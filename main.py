@@ -47,13 +47,13 @@ events = mne.find_events(raw, stim_channel="Status", mask=255, min_duration=1.00
 events = mne.pick_events(events, include=[210,211,212,213,220,221,222,223])
 
 #Only take the events after a break
-events = np.array([e for (i,e) in enumerate(events) if events[i][0] - events[i-1][0] > 1.5*2048])
+events = np.array([e for (i,e) in enumerate(events) if events[i][0] - events[i-1][0] > 4*2048])
 
 # minimum_duration = np.min(np.diff(events.T[0]))/2048
 # print(f"set events minimum duration is {minimum_duration}")
 
 # Construct epochs
-tmin, tmax = 0, 120  # in s
+tmin, tmax = 0, 30  # in s
 baseline = None
 epochs = mne.Epochs(
     raw,
@@ -69,7 +69,6 @@ fmin = 0.5
 fmax = 4.0
 sfreq = epochs.info["sfreq"]
 
-tmin, tmax = 1, 120  # in s
 spectrum = epochs.compute_psd(
     "welch",
     n_fft=int(sfreq * (tmax - tmin)),
@@ -166,5 +165,5 @@ axes[1].set(
     ylabel="SNR",
     xlim=[fmin, fmax],
 )
-fig.savefig("elad.png")
+fig.savefig("elad-post-breaks.png")
 #Todo: Add a cropped version.
