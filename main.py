@@ -38,7 +38,7 @@ roi_vis = [
 ] 
 
 # filter redundant data
-raw.pick_channels(roi_vis)
+raw.pick(roi_vis)
 raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin", verbose=False, n_jobs=-1)
 
 # detect events and edit
@@ -74,8 +74,6 @@ spectrum = epochs.compute_psd(
     n_fft=int(sfreq * (tmax - tmin)),
     fmin=fmin,
     fmax=fmax,
-    tmin=tmin,
-    tmax=tmax,
     verbose=False,
     # n_overlap=2048,
     # n_per_seg=int(sfreq)*50,
