@@ -1,14 +1,9 @@
 import matplotlib.pyplot as plt
-
 import numpy as np
-from scipy.stats import ttest_rel
-
 import mne
 
 # Load raw data
 data_path = "S213_1.bdf"
-
-TIME = 600
 
 raw = mne.io.read_raw_bdf("S213_1.bdf", preload=True, verbose=False)
 raw = raw.crop(600,600+4000)
@@ -25,20 +20,6 @@ raw.set_montage(montage='biosemi64')
 raw.set_eeg_reference("average", projection=False, verbose=False)
 
 
-roi_vis = [
-    "POz",
-    "Oz",
-    "O1",
-    "O2",
-    "PO3",
-    "PO4",
-    "PO7",
-    "PO8",
-    "Status"
-] 
-
-# filter redundant data
-raw.pick(roi_vis)
 raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin", verbose=False, n_jobs=-1)
 
 # detect events and edit
@@ -164,4 +145,38 @@ axes[1].set(
     xlim=[fmin, fmax],
 )
 fig.savefig("elad-post-breaks.png")
-#Todo: Add a cropped version.
+
+#topographic
+roi_vis = [
+    "POz",
+    "Oz",
+    "O1",
+    "O2",
+    "PO3",
+    "PO4",
+    "PO7",
+    "PO8"
+] 
+
+# Find corresponding indices using mne.pick_types()
+picks_roi_vis = mne.pick_types(
+    epochs.info, eeg=True, stim=False, exclude="bads", selection=roi_vis
+)
+
+STIM_FREQUENCY = 1/1.1
+
+# find index of frequency bin closest to stimulation frequency
+i_bin_1hz = np.argmin(abs(freqs - STIM_FREQUENCY))
+snrs_target = snrs[:, :, i_bin_1hz][:, picks_roi_vis]
+
+# get average SNR at 1 Hz for ALL channels
+snrs_1hz = snrs[:, :, i_bin_1hz]
+snrs_1hz_chaverage = snrs_1hz.mean(axis=0)
+
+# plot SNR topography
+fig, ax = plt.subplots(1)
+mne.viz.plot_topomap(snrs_1hz_chaverage, epochs.info, vlim=(1, None), axes=ax)
+fig.savefig("topography.png")
+
+print(f"average SNR (all channels): {snrs_1hz_chaverage.mean()}")
+print(f"average SNR (occipital ROI): {snrs_target.mean()}")
