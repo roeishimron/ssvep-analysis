@@ -2,16 +2,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-# Load raw data
-data_path = "S213_1.bdf"
+raw = mne.io.read_raw_bdf("udi-data/Testdata.bdf", preload=True, verbose=False)
+tmin, tmax = 10, 5*60-10  # in s
+raw = raw.crop(tmin,tmax)
 
-raw = mne.io.read_raw_bdf("S213_1.bdf", preload=True, verbose=False)
-raw = raw.crop(600,600+4000)
 print("read data")
 
-raw.drop_channels(raw.ch_names[72:-1])
-raw.set_channel_types(mapping={'Nose': 'eog', 'LHEOG': 'eog', 'RHEOG': 'eog', 'RVEOGS': 'eog',
-                                   'RVEOGI': 'eog', 'M1': 'eog', 'M2': 'eog', 'LVEOGI': 'eog'})
+raw.drop_channels(raw.ch_names[64:-1])
+raw.drop_channels(["PO4", "P2"])
+
+# raw.set_channel_types(mapping={'Nose': 'eog', 'LHEOG': 'eog', 'RHEOG': 'eog', 'RVEOGS': 'eog',
+#                                    'RVEOGI': 'eog', 'M1': 'eog', 'M2': 'eog', 'LVEOGI': 'eog'})
 
 # Set montage
 raw.set_montage(montage='biosemi64')
@@ -19,38 +20,36 @@ raw.set_montage(montage='biosemi64')
 # Set common average reference
 raw.set_eeg_reference("average", projection=False, verbose=False)
 
-
 raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin", verbose=False, n_jobs=-1)
 
 # detect events and edit
-events = mne.find_events(raw, stim_channel="Status", mask=255, min_duration=1.001 / raw.info['sfreq'])
+# events = mne.find_events(raw, stim_channel="Status", mask=255, min_duration=1.001 / raw.info['sfreq'])
 
-events = mne.pick_events(events, include=[210,211,212,213,220,221,222,223])
+# events = mne.pick_events(events, include=[210,211,212,213,220,221,222,223])
 
 #Only take the events after a break
-events = np.array([e for (i,e) in enumerate(events) if events[i][0] - events[i-1][0] > 4*2048])
+# events = np.array([e for (i,e) in enumerate(events) if events[i][0] - events[i-1][0] > 4*2048])
 
 # minimum_duration = np.min(np.diff(events.T[0]))/2048
 # print(f"set events minimum duration is {minimum_duration}")
 
 # Construct epochs
-tmin, tmax = 0, 30  # in s
-baseline = None
-epochs = mne.Epochs(
-    raw,
-    events=events,
-    tmin=tmin,
-    tmax=tmax,
-    baseline=baseline,
-    verbose=False,
-)
+# baseline = None
+# epochs = mne.Epochs(
+#     raw,
+#     events=events,
+#     tmin=tmin,
+#     tmax=tmax,
+#     baseline=baseline,
+#     verbose=False,
+# )
 
 #Calculate PSD
 fmin = 0.5
-fmax = 4.0
-sfreq = epochs.info["sfreq"]
+fmax = 15.0
+sfreq = 2048
 
-spectrum = epochs.compute_psd(
+spectrum = raw.compute_psd(
     "welch",
     n_fft=int(sfreq * (tmax - tmin)),
     fmin=fmin,
@@ -113,7 +112,7 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     return psd / mean_noise
 
 #Average every 3 bins
-snrs = snr_spectrum(psds, noise_n_neighbor_freqs=3, noise_skip_neighbor_freqs=1)
+snrs = snr_spectrum(psds, noise_n_neighbor_freqs=13, noise_skip_neighbor_freqs=1)
 
 print("got snr")
 fig, axes = plt.subplots(2, 1, sharex="all", sharey="none", figsize=(8, 5))
@@ -122,8 +121,8 @@ freq_range = range(
 )
 
 psds_plot = 10 * np.log10(psds)
-psds_mean = psds_plot.mean(axis=(0, 1))[freq_range]
-psds_std = psds_plot.std(axis=(0, 1))[freq_range]
+psds_mean = psds_plot.mean(axis=(0))[freq_range]
+psds_std = psds_plot.std(axis=(0))[freq_range]
 axes[0].plot(freqs[freq_range], psds_mean, color="b")
 axes[0].fill_between(
     freqs[freq_range], psds_mean - psds_std, psds_mean + psds_std, color="b", alpha=0.1
@@ -131,8 +130,8 @@ axes[0].fill_between(
 axes[0].set(title="PSD spectrum", ylabel="Power Spectral Density [dB]")
 
 # SNR spectrum
-snr_mean = snrs.mean(axis=(0, 1))[freq_range]
-snr_std = snrs.std(axis=(0, 1))[freq_range]
+snr_mean = snrs.mean(axis=(0))[freq_range]
+snr_std = snrs.std(axis=(0))[freq_range]
 
 axes[1].plot(freqs[freq_range], snr_mean, color="r")
 axes[1].fill_between(
@@ -144,39 +143,21 @@ axes[1].set(
     ylabel="SNR",
     xlim=[fmin, fmax],
 )
-fig.savefig("elad-post-breaks.png")
+fig.savefig("udi-all.png")
 
-#topographic
-roi_vis = [
-    "POz",
-    "Oz",
-    "O1",
-    "O2",
-    "PO3",
-    "PO4",
-    "PO7",
-    "PO8"
-] 
 
 # Find corresponding indices using mne.pick_types()
-picks_roi_vis = mne.pick_types(
-    epochs.info, eeg=True, stim=False, exclude="bads", selection=roi_vis
-)
-
-STIM_FREQUENCY = 1/1.1
 
 # find index of frequency bin closest to stimulation frequency
-i_bin_1hz = np.argmin(abs(freqs - STIM_FREQUENCY))
-snrs_target = snrs[:, :, i_bin_1hz][:, picks_roi_vis]
+i_bin_1hz = np.argmax(snr_mean[100:2000])
 
 # get average SNR at 1 Hz for ALL channels
-snrs_1hz = snrs[:, :, i_bin_1hz]
-snrs_1hz_chaverage = snrs_1hz.mean(axis=0)
+snrs_1hz = snrs[:, i_bin_1hz]
+snrs_1hz_chaverage = snrs_1hz
 
 # plot SNR topography
 fig, ax = plt.subplots(1)
-mne.viz.plot_topomap(snrs_1hz_chaverage, epochs.info, vlim=(1, None), axes=ax)
+mne.viz.plot_topomap(snrs_1hz_chaverage, raw.info, vlim=(1, None), axes=ax)
 fig.savefig("topography.png")
 
 print(f"average SNR (all channels): {snrs_1hz_chaverage.mean()}")
-print(f"average SNR (occipital ROI): {snrs_target.mean()}")
