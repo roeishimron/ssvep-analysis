@@ -3,7 +3,7 @@ import numpy as np
 import mne
 
 raw = mne.io.read_raw_bdf("udi-data/Testdata.bdf", preload=True, verbose=False)
-tmin, tmax = 10, 5*60-10  # in s
+tmin, tmax = 20, 5*60-10  # in s
 raw = raw.crop(tmin,tmax)
 
 print("read data")
@@ -116,26 +116,24 @@ snrs = snr_spectrum(psds, noise_n_neighbor_freqs=13, noise_skip_neighbor_freqs=1
 
 print("got snr")
 fig, axes = plt.subplots(2, 1, sharex="all", sharey="none", figsize=(8, 5))
-freq_range = range(
-    np.where(freqs >= fmin)[0][0], np.where(freqs >= fmax)[0][0]
-)
+
 
 psds_plot = 10 * np.log10(psds)
-psds_mean = psds_plot.mean(axis=(0))[freq_range]
-psds_std = psds_plot.std(axis=(0))[freq_range]
-axes[0].plot(freqs[freq_range], psds_mean, color="b")
+psds_mean = psds_plot.mean(axis=(0))
+psds_std = psds_plot.std(axis=(0))
+axes[0].plot(freqs, psds_mean, color="b")
 axes[0].fill_between(
-    freqs[freq_range], psds_mean - psds_std, psds_mean + psds_std, color="b", alpha=0.1
+    freqs, psds_mean - psds_std, psds_mean + psds_std, color="b", alpha=0.1
 )
 axes[0].set(title="PSD spectrum", ylabel="Power Spectral Density [dB]")
 
 # SNR spectrum
-snr_mean = snrs.mean(axis=(0))[freq_range]
-snr_std = snrs.std(axis=(0))[freq_range]
+snr_mean = snrs.mean(axis=(0))
+snr_std = snrs.std(axis=(0))
 
-axes[1].plot(freqs[freq_range], snr_mean, color="r")
+axes[1].plot(freqs, snr_mean, color="r")
 axes[1].fill_between(
-    freqs[freq_range], snr_mean - snr_std, snr_mean + snr_std, color="r", alpha=0.1
+    freqs, snr_mean - snr_std, snr_mean + snr_std, color="r", alpha=0.1
 )
 axes[1].set(
     title="SNR spectrum",
@@ -149,15 +147,17 @@ fig.savefig("udi-all.png")
 # Find corresponding indices using mne.pick_types()
 
 # find index of frequency bin closest to stimulation frequency
-i_bin_1hz = np.argmax(snr_mean[100:2000])
+MIN_INDEX = 100
+i_bin_6hz = np.argmax(snr_mean[MIN_INDEX:2500]) + MIN_INDEX # adding because the arg is relative to the array
+print(f"maximum freq is {freqs[i_bin_6hz]} with value of {snr_mean[i_bin_6hz]}")
 
 # get average SNR at 1 Hz for ALL channels
-snrs_1hz = snrs[:, i_bin_1hz]
-snrs_1hz_chaverage = snrs_1hz
+snrs_6hz = snrs[:, i_bin_6hz]
+snrs_6hz_chaverage = snrs_6hz
 
 # plot SNR topography
 fig, ax = plt.subplots(1)
-mne.viz.plot_topomap(snrs_1hz_chaverage, raw.info, vlim=(1, None), axes=ax)
+mne.viz.plot_topomap(snrs_6hz_chaverage, raw.info, vlim=(1, None), axes=ax)
 fig.savefig("topography.png")
 
-print(f"average SNR (all channels): {snrs_1hz_chaverage.mean()}")
+print(f"average SNR (all channels): {snrs_6hz_chaverage.mean()}")
