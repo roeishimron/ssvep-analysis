@@ -1,6 +1,9 @@
 import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
 import mne
+
+matplotlib.use('qtagg')
 
 # Load raw data
 raw = mne.io.read_raw_bdf("udi-data/Testdata-udi2.bdf", preload=True, verbose=False)
@@ -127,7 +130,8 @@ axes[1].set(
     ylabel="SNR",
     xlim=[fmin, fmax],
 )
-fig.savefig("udi-snr.png")
+fig.show()
+
 #topographic
 roi_vis = [
     "POz",

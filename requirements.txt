@@ -2,4 +2,4 @@ mne
 matplotlib
 numpy
 scipy
-joblib
+pyside6
