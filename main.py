@@ -8,10 +8,6 @@ raw = raw.crop(tmin,tmax)
 
 print("read data")
 
-# raw.drop_channels(["PO4", "P2"])
-
-montage = mne.channels.make_standard_montage("standard_postfixed")# Set montage
-
 raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
 
 
