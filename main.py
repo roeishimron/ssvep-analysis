@@ -2,52 +2,35 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-raw = mne.io.read_raw_bdf("udi-data/Testdata.bdf", preload=True, verbose=False)
-tmin, tmax = 20, 5*60-10  # in s
+raw = mne.io.read_raw_edf("roei-data/test4_raw.edf", preload=True, verbose=False)
+tmin, tmax = 15, 180-10  # in s
 raw = raw.crop(tmin,tmax)
 
 print("read data")
 
-raw.drop_channels(raw.ch_names[64:-1])
-raw.drop_channels(["PO4", "P2"])
+# raw.drop_channels(["PO4", "P2"])
 
-# raw.set_channel_types(mapping={'Nose': 'eog', 'LHEOG': 'eog', 'RHEOG': 'eog', 'RVEOGS': 'eog',
-#                                    'RVEOGI': 'eog', 'M1': 'eog', 'M2': 'eog', 'LVEOGI': 'eog'})
+montage = mne.channels.make_standard_montage("standard_postfixed")# Set montage
 
-# Set montage
-raw.set_montage(montage='biosemi64')
+raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
+
+
+raw.drop_channels(['Ax', 'Ay', 'Az'])
+raw.drop_channels(['X3:', 'X2:', 'X1:', 'Event', 'CM'])
+raw.set_eeg_reference()
+
+raw.set_montage(montage='standard_1020')
 
 # Set common average reference
-raw.set_eeg_reference("average", projection=False, verbose=False)
 
 raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin", verbose=False, n_jobs=-1)
 
-# detect events and edit
-# events = mne.find_events(raw, stim_channel="Status", mask=255, min_duration=1.001 / raw.info['sfreq'])
-
-# events = mne.pick_events(events, include=[210,211,212,213,220,221,222,223])
-
-#Only take the events after a break
-# events = np.array([e for (i,e) in enumerate(events) if events[i][0] - events[i-1][0] > 4*2048])
-
-# minimum_duration = np.min(np.diff(events.T[0]))/2048
-# print(f"set events minimum duration is {minimum_duration}")
-
-# Construct epochs
-# baseline = None
-# epochs = mne.Epochs(
-#     raw,
-#     events=events,
-#     tmin=tmin,
-#     tmax=tmax,
-#     baseline=baseline,
-#     verbose=False,
-# )
+raw.pick(["O1", "Pz"])
 
 #Calculate PSD
 fmin = 0.5
-fmax = 15.0
-sfreq = 2048
+fmax = 30.0
+sfreq = 300
 
 spectrum = raw.compute_psd(
     "welch",
@@ -112,7 +95,7 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     return psd / mean_noise
 
 #Average every 3 bins
-snrs = snr_spectrum(psds, noise_n_neighbor_freqs=13, noise_skip_neighbor_freqs=1)
+snrs = snr_spectrum(psds, noise_n_neighbor_freqs=15, noise_skip_neighbor_freqs=1)
 
 print("got snr")
 fig, axes = plt.subplots(2, 1, sharex="all", sharey="none", figsize=(8, 5))
@@ -148,7 +131,7 @@ fig.savefig("udi-all.png")
 
 # find index of frequency bin closest to stimulation frequency
 MIN_INDEX = 100
-i_bin_6hz = np.argmax(snr_mean[MIN_INDEX:2500]) + MIN_INDEX # adding because the arg is relative to the array
+i_bin_6hz = np.argmax(snr_mean[MIN_INDEX:-MIN_INDEX]) + MIN_INDEX # adding because the arg is relative to the array
 print(f"maximum freq is {freqs[i_bin_6hz]} with value of {snr_mean[i_bin_6hz]}")
 
 # get average SNR at 1 Hz for ALL channels
