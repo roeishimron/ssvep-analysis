@@ -2,14 +2,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-raw = mne.io.read_raw_edf("roei-data/test4_raw.edf", preload=True, verbose=False)
+FILENAME = "test-sin-reversal-5_raw"
+raw = mne.io.read_raw_edf(f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
 tmin, tmax = 15, 180-10  # in s
 raw = raw.crop(tmin,tmax)
 
 print("read data")
 
 raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
-
 
 raw.drop_channels(['Ax', 'Ay', 'Az'])
 raw.drop_channels(['X3:', 'X2:', 'X1:', 'Event', 'CM'])
@@ -21,7 +21,7 @@ raw.set_montage(montage='standard_1020')
 
 raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin", verbose=False, n_jobs=-1)
 
-# raw.pick(["O1", "Pz"])
+# raw.pick(["O1", "O2", "Pz"])
 
 #Calculate PSD
 fmin = 0.5
@@ -120,7 +120,7 @@ axes[1].set(
     ylabel="SNR",
     xlim=[fmin, fmax],
 )
-fig.savefig("udi-all.png")
+fig.savefig(f"{FILENAME}-graph.png")
 
 
 # Find corresponding indices using mne.pick_types()
@@ -137,6 +137,6 @@ snrs_6hz_chaverage = snrs_6hz
 # plot SNR topography
 fig, ax = plt.subplots(1)
 mne.viz.plot_topomap(snrs_6hz_chaverage, raw.info, vlim=(1, None), axes=ax)
-fig.savefig("topography.png")
+fig.savefig(f"{FILENAME}-topography.png")
 
 print(f"average SNR (all channels): {snrs_6hz_chaverage.mean()}")
