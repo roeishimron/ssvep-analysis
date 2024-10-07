@@ -25,7 +25,7 @@ raw.set_montage(montage='standard_1020')
 
 raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin", verbose=False, n_jobs=-1)
 
-raw.pick(["O1", "Pz"])
+# raw.pick(["O1", "Pz"])
 
 #Calculate PSD
 fmin = 0.5
