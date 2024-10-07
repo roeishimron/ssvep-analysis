@@ -3,3 +3,4 @@ matplotlib
 numpy
 scipy
 pyside6
+joblib
