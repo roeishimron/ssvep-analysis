@@ -2,10 +2,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "test-sin-reversal-5_raw"
-raw = mne.io.read_raw_edf(f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
-tmin, tmax = 15, 180-10  # in s
-raw = raw.crop(tmin,tmax)
+FILENAME = "test_roei_words_vs_arabic_raw"
+raw = mne.io.read_raw_edf(
+    f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
+tmin, tmax = 10, 170  # in s
+raw = raw.crop(tmin, tmax)
 
 print("read data")
 
@@ -19,13 +20,14 @@ raw.set_montage(montage='standard_1020')
 
 # Set common average reference
 
-raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin", verbose=False, n_jobs=-1)
+raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin",
+           verbose=False, n_jobs=-1)
 
 # raw.pick(["O1", "O2", "Pz"])
 
-#Calculate PSD
+# Calculate PSD
 fmin = 0.5
-fmax = 30.0
+fmax = 15.0
 sfreq = 300
 
 spectrum = raw.compute_psd(
@@ -41,6 +43,7 @@ spectrum = raw.compute_psd(
 psds, freqs = spectrum.get_data(return_freqs=True)
 
 print("got psds")
+
 
 def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     """Compute SNR spectrum from PSD spectrum using convolution.
@@ -86,12 +89,17 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     # (0, 0) for the other ones.
     edge_width = noise_n_neighbor_freqs + noise_skip_neighbor_freqs
     pad_width = [(0, 0)] * (mean_noise.ndim - 1) + [(edge_width, edge_width)]
-    mean_noise = np.pad(mean_noise, pad_width=pad_width, constant_values=np.nan)
+    mean_noise = np.pad(mean_noise, pad_width=pad_width,
+                        constant_values=np.nan)
 
     return psd / mean_noise
 
-#Average every 3 bins
-snrs = snr_spectrum(psds, noise_n_neighbor_freqs=15, noise_skip_neighbor_freqs=1)
+
+# Average every 3 bins
+NOISE_NEIGHBORS = 5
+NOISE_SKIP = 1
+snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
+                    noise_skip_neighbor_freqs=NOISE_SKIP)
 
 print("got snr")
 fig, axes = plt.subplots(2, 1, sharex="all", sharey="none", figsize=(8, 5))
@@ -126,9 +134,21 @@ fig.savefig(f"{FILENAME}-graph.png")
 # Find corresponding indices using mne.pick_types()
 
 # find index of frequency bin closest to stimulation frequency
-MIN_INDEX = 100
-i_bin_6hz = np.argmax(snr_mean[MIN_INDEX:-MIN_INDEX]) + MIN_INDEX # adding because the arg is relative to the array
-print(f"maximum freq is {freqs[i_bin_6hz]} with value of {snr_mean[i_bin_6hz]}")
+# MIN_INDEX = NOISE_NEIGHBORS + NOISE_SKIP
+
+TARGET_FREQ = 2.5/2*3
+RANGE_OF_TOPO_SEARCH = int(0.1 * sfreq)
+target_center = int(np.argmin(np.abs(freqs - TARGET_FREQ)))
+
+range_start = target_center - RANGE_OF_TOPO_SEARCH
+range_end = target_center + RANGE_OF_TOPO_SEARCH
+
+# adding in the end because the arg is relative to the array
+i_bin_6hz = np.argmax(snr_mean[range_start:range_end]) + range_start
+
+
+print(f"looking at freq {freqs[i_bin_6hz]
+                         } with value of {snr_mean[i_bin_6hz]}")
 
 # get average SNR at 1 Hz for ALL channels
 snrs_6hz = snrs[:, i_bin_6hz]
