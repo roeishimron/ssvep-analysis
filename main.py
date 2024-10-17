@@ -2,9 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "test_roei_words_vs_arabic_raw"
+FILENAME = "vered_words_raw"
 raw = mne.io.read_raw_edf(
-    f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
+    f"experiments/day1/{FILENAME}.edf", preload=True, verbose=False)
 tmin, tmax = 10, 170  # in s
 raw = raw.crop(tmin, tmax)
 
@@ -13,7 +13,7 @@ print("read data")
 raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
 
 raw.drop_channels(['Ax', 'Ay', 'Az'])
-raw.drop_channels(['X3:', 'X2:', 'X1:', 'Event', 'CM'])
+raw.drop_channels(['X3:S1', 'X2:S2', 'X1:S3', 'Event', 'CM'])
 raw.set_eeg_reference()
 
 raw.set_montage(montage='standard_1020')
@@ -96,8 +96,8 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
 
 # Average every 3 bins
-NOISE_NEIGHBORS = 5
-NOISE_SKIP = 1
+NOISE_NEIGHBORS = 20
+NOISE_SKIP = 10
 snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
 
