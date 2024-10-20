@@ -2,11 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "look_for_events_0004_raw"
+FILENAME = "roei_font_0001_raw"
 raw = mne.io.read_raw_edf(
     f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
-tmin, tmax = 10, 170  # in s
-raw = raw.crop(tmin, tmax)
 
 print("read data")
 
@@ -25,11 +23,11 @@ raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin",
 
 
 # detect events and edit
-events = mne.find_events(raw, stim_channel="Trigger", mask=255, min_duration=0.01)
+events = mne.find_events(raw, stim_channel="Trigger", mask=255, min_duration=0.01)[1:]
 # events = mne.pick_events(events, include=[3])
 
 # Construct epochs
-tmin, tmax = 0, 1  # in s
+tmin, tmax = 5, 45  # in s
 epochs = mne.Epochs(
     raw,
     events=events,
@@ -110,8 +108,8 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
 
 # Average every 3 bins
-NOISE_NEIGHBORS = 3
-NOISE_SKIP = 1
+NOISE_NEIGHBORS = 4
+NOISE_SKIP = 2
 snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
 
@@ -150,27 +148,28 @@ fig.savefig(f"{FILENAME}-graph.png")
 # find index of frequency bin closest to stimulation frequency
 # MIN_INDEX = NOISE_NEIGHBORS + NOISE_SKIP
 
-TARGET_FREQ = 2.5/2*3
+TARGET_FREQ = 1
 RANGE_OF_TOPO_SEARCH = int(0.1 * sfreq)
 target_center = int(np.argmin(np.abs(freqs - TARGET_FREQ)))
 
-range_start = target_center - RANGE_OF_TOPO_SEARCH
+range_start = np.max([target_center - RANGE_OF_TOPO_SEARCH, NOISE_NEIGHBORS + NOISE_SKIP])
 range_end = target_center + RANGE_OF_TOPO_SEARCH
 
 # adding in the end because the arg is relative to the array
-i_bin_6hz = np.argmax(snr_mean[range_start:range_end]) + range_start
+i_bin_target_hz = np.argmax(snr_mean[range_start:range_end]) + range_start
 
 
-print(f"looking at freq {freqs[i_bin_6hz]
-                         } with value of {snr_mean[i_bin_6hz]}")
+print(f"looking at freq {freqs[i_bin_target_hz]
+                         } with value of {snr_mean[i_bin_target_hz]}")
+
 
 # get average SNR at 1 Hz for ALL channels
-snrs_6hz = snrs[:, i_bin_6hz]
-snrs_6hz_chaverage = snrs_6hz
+snrs_stim_hz = snrs[:, :, i_bin_target_hz]
+snrs_stim_hz_chaverage = snrs_stim_hz.mean(axis=0)
 
 # plot SNR topography
 fig, ax = plt.subplots(1)
-mne.viz.plot_topomap(snrs_6hz_chaverage, raw.info, vlim=(1, None), axes=ax)
+mne.viz.plot_topomap(snrs_stim_hz_chaverage, raw.info, vlim=(1, None), axes=ax)
 fig.savefig(f"{FILENAME}-topography.png")
 
-print(f"average SNR (all channels): {snrs_6hz_chaverage.mean()}")
+print(f"average SNR (all channels): {snrs_stim_hz_chaverage.mean()}")
