@@ -2,9 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "vered_words_raw"
+FILENAME = "look_for_events_0004_raw"
 raw = mne.io.read_raw_edf(
-    f"experiments/day1/{FILENAME}.edf", preload=True, verbose=False)
+    f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
 tmin, tmax = 10, 170  # in s
 raw = raw.crop(tmin, tmax)
 
@@ -23,14 +23,28 @@ raw.set_montage(montage='standard_1020')
 raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin",
            verbose=False, n_jobs=-1)
 
-# raw.pick(["O1", "O2", "Pz"])
+
+# detect events and edit
+events = mne.find_events(raw, stim_channel="Trigger", mask=255, min_duration=0.01)
+# events = mne.pick_events(events, include=[3])
+
+# Construct epochs
+tmin, tmax = 0, 1  # in s
+epochs = mne.Epochs(
+    raw,
+    events=events,
+    tmin=tmin,
+    tmax=tmax,
+    baseline=None,
+    verbose=False,
+)
 
 # Calculate PSD
 fmin = 0.5
 fmax = 15.0
 sfreq = 300
 
-spectrum = raw.compute_psd(
+spectrum = epochs.compute_psd(
     "welch",
     n_fft=int(sfreq * (tmax - tmin)),
     fmin=fmin,
@@ -96,8 +110,8 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
 
 # Average every 3 bins
-NOISE_NEIGHBORS = 20
-NOISE_SKIP = 10
+NOISE_NEIGHBORS = 3
+NOISE_SKIP = 1
 snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
 
@@ -106,8 +120,8 @@ fig, axes = plt.subplots(2, 1, sharex="all", sharey="none", figsize=(8, 5))
 
 
 psds_plot = 10 * np.log10(psds)
-psds_mean = psds_plot.mean(axis=(0))
-psds_std = psds_plot.std(axis=(0))
+psds_mean = psds_plot.mean(axis=(0, 1))
+psds_std = psds_plot.std(axis=(0, 1))
 axes[0].plot(freqs, psds_mean, color="b")
 axes[0].fill_between(
     freqs, psds_mean - psds_std, psds_mean + psds_std, color="b", alpha=0.1
@@ -115,8 +129,8 @@ axes[0].fill_between(
 axes[0].set(title="PSD spectrum", ylabel="Power Spectral Density [dB]")
 
 # SNR spectrum
-snr_mean = snrs.mean(axis=(0))
-snr_std = snrs.std(axis=(0))
+snr_mean = snrs.mean(axis=(0, 1))
+snr_std = snrs.std(axis=(0, 1))
 
 axes[1].plot(freqs, snr_mean, color="r")
 axes[1].fill_between(
