@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "roei_font_0001_raw"
+FILENAME = "udi_font_raw"
 raw = mne.io.read_raw_edf(
     f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
 
@@ -23,8 +23,13 @@ raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin",
 
 
 # detect events and edit
-events = mne.find_events(raw, stim_channel="Trigger", mask=255, min_duration=0.01)[1:]
-# events = mne.pick_events(events, include=[3])
+events = mne.find_events(raw, stim_channel="Trigger", mask=255)
+
+# Handle too close events:
+diffs = np.diff(events[:,0], prepend=0)
+valids = np.argwhere(diffs > 1000).flatten()
+events = events[valids]
+print(f"found {len(events)} events")
 
 # Construct epochs
 tmin, tmax = 5, 45  # in s
