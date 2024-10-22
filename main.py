@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "udi_font_raw"
+FILENAME = "roei_faster_arabic_nofont_raw"
 raw = mne.io.read_raw_edf(
     f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
 
@@ -18,7 +18,7 @@ raw.set_montage(montage='standard_1020')
 
 # Set common average reference
 
-raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin",
+raw.filter(l_freq=1, h_freq=None, fir_design="firwin",
            verbose=False, n_jobs=-1)
 
 
@@ -26,7 +26,7 @@ raw.filter(l_freq=0.5, h_freq=None, fir_design="firwin",
 events = mne.find_events(raw, stim_channel="Trigger", mask=255)
 
 # Handle too close events:
-diffs = np.diff(events[:,0], prepend=0)
+diffs = np.diff(events[:,0], prepend=-1000)
 valids = np.argwhere(diffs > 1000).flatten()
 events = events[valids]
 print(f"found {len(events)} events")
@@ -153,8 +153,8 @@ fig.savefig(f"{FILENAME}-graph.png")
 # find index of frequency bin closest to stimulation frequency
 # MIN_INDEX = NOISE_NEIGHBORS + NOISE_SKIP
 
-TARGET_FREQ = 1
-RANGE_OF_TOPO_SEARCH = int(0.1 * sfreq)
+TARGET_FREQ = 5.88/5*2
+RANGE_OF_TOPO_SEARCH = int(0.01 * sfreq)
 target_center = int(np.argmin(np.abs(freqs - TARGET_FREQ)))
 
 range_start = np.max([target_center - RANGE_OF_TOPO_SEARCH, NOISE_NEIGHBORS + NOISE_SKIP])
