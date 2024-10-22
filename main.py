@@ -2,9 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "roei_faster_arabic_nofont_raw"
+FILENAME = "roei_repeats_arabic"
 raw = mne.io.read_raw_edf(
-    f"roei-data/{FILENAME}.edf", preload=True, verbose=False)
+    f"roei-data/{FILENAME}_raw.edf", preload=True, verbose=False)
 
 print("read data")
 
@@ -26,13 +26,13 @@ raw.filter(l_freq=1, h_freq=None, fir_design="firwin",
 events = mne.find_events(raw, stim_channel="Trigger", mask=255)
 
 # Handle too close events:
-diffs = np.diff(events[:,0], prepend=-1000)
+diffs = np.diff(events[:,0], append=raw.last_samp)
 valids = np.argwhere(diffs > 1000).flatten()
 events = events[valids]
 print(f"found {len(events)} events")
 
 # Construct epochs
-tmin, tmax = 5, 45  # in s
+tmin, tmax = 5, 60  # in s
 epochs = mne.Epochs(
     raw,
     events=events,
