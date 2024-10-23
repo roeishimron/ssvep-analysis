@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mne
 
-FILENAME = "roei_repeats_arabic"
+FILENAME = "roei_font_color_arabic"
 raw = mne.io.read_raw_edf(
     f"roei-data/{FILENAME}_raw.edf", preload=True, verbose=False)
 
@@ -14,8 +14,9 @@ raw.drop_channels(['Ax', 'Ay', 'Az'])
 raw.drop_channels(['X3:S1', 'X2:S2', 'X1:S3', 'Event', 'CM'])
 raw.set_eeg_reference()
 
-raw.set_montage(montage='standard_1020')
+# raw.set_montage(montage='standard_1020')
 
+raw.pick(["T3", "T5", "Trigger"])
 # Set common average reference
 
 raw.filter(l_freq=1, h_freq=None, fir_design="firwin",
@@ -32,7 +33,7 @@ events = events[valids]
 print(f"found {len(events)} events")
 
 # Construct epochs
-tmin, tmax = 5, 60  # in s
+tmin, tmax = 5, 58  # in s
 epochs = mne.Epochs(
     raw,
     events=events,
@@ -151,9 +152,8 @@ fig.savefig(f"{FILENAME}-graph.png")
 # Find corresponding indices using mne.pick_types()
 
 # find index of frequency bin closest to stimulation frequency
-# MIN_INDEX = NOISE_NEIGHBORS + NOISE_SKIP
 
-TARGET_FREQ = 5.88/5*2
+TARGET_FREQ = 5.88/5*4
 RANGE_OF_TOPO_SEARCH = int(0.01 * sfreq)
 target_center = int(np.argmin(np.abs(freqs - TARGET_FREQ)))
 
