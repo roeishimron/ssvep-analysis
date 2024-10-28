@@ -152,7 +152,11 @@ fig.savefig(f"{FILENAME}-graph.png")
 
 # find index of frequency bin closest to stimulation frequency
 
-TARGET_FREQ = 5.88/5*4
+BASE_FREQ = 5.88
+HARMONEY_FREQ = 2
+ODDBALL_MODULATION = 5
+
+TARGET_FREQ = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQ 
 RANGE_OF_TOPO_SEARCH = int(0.01 * sfreq)
 target_center = int(np.argmin(np.abs(freqs - TARGET_FREQ)))
 
@@ -173,6 +177,7 @@ snrs_stim_hz_chaverage = snrs_stim_hz.mean(axis=0)
 
 # plot SNR topography
 fig, ax = plt.subplots(1)
+ax.set_title(f"SNR at {freqs[i_bin_target_hz]} (F*{freqs[i_bin_target_hz]/BASE_FREQ*ODDBALL_MODULATION})")
 mne.viz.plot_topomap(snrs_stim_hz_chaverage, raw.info, vlim=(1, None), axes=ax)
 fig.savefig(f"{FILENAME}-topography.png")
 
