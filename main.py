@@ -113,8 +113,8 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
 
 # Average every 3 bins
-NOISE_NEIGHBORS = 4
-NOISE_SKIP = 2
+NOISE_NEIGHBORS = 3
+NOISE_SKIP = 1
 snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
 
