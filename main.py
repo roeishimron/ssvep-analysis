@@ -12,12 +12,13 @@ raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
 
 raw.drop_channels(['Ax', 'Ay', 'Az'])
 raw.drop_channels(['X3:S1', 'X2:S2', 'X1:S3', 'Event', 'CM'])
+
+# Set common average reference
 raw.set_eeg_reference()
 
-# raw.set_montage(montage='standard_1020')
+raw.set_montage(montage='standard_1020')
 
-raw.pick(["T3", "T5", "Trigger"])
-# Set common average reference
+# raw.pick(["T3", "T5", "O1", "O2", "T4", "T6", "Pz", "Cz", "Trigger"])
 
 # Not filtering
 
