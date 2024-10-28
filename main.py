@@ -19,9 +19,7 @@ raw.set_eeg_reference()
 raw.pick(["T3", "T5", "Trigger"])
 # Set common average reference
 
-raw.filter(l_freq=1, h_freq=None, fir_design="firwin",
-           verbose=False, n_jobs=-1)
-
+# Not filtering
 
 # detect events and edit
 events = mne.find_events(raw, stim_channel="Trigger", mask=255)
