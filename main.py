@@ -4,7 +4,7 @@ import mne
 
 FILENAME = "roei_font_color_arabic"
 raw = mne.io.read_raw_edf(
-    f"roei-data/{FILENAME}_raw.edf", preload=True, verbose=False)
+    f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
 print("read data")
 

@@ -24,6 +24,11 @@
 			"source": "/dev/dri/renderD128",
 			"target": "/dev/dri/renderD128",
 			"type": "bind"
+		},
+		{
+			"source": "/media/lab-server",
+			"target": "/media/lab-server",
+			"type": "bind"
 		}
 	],
 	"containerEnv": {
