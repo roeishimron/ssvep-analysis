@@ -1,8 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import mne
+from typing import Tuple
 
-FILENAME = "roei_font_color_arabic"
+FILENAME = "roei_anoter_hebrew_vs_arabic_1"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
@@ -26,7 +27,7 @@ raw.set_montage(montage='standard_1020')
 events = mne.find_events(raw, stim_channel="Trigger", mask=255)
 
 # Handle too close events:
-diffs = np.diff(events[:,0], append=raw.last_samp)
+diffs = np.diff(events[:, 0], append=raw.last_samp)
 valids = np.argwhere(diffs > 1000).flatten()
 events = events[valids]
 print(f"found {len(events)} events")
@@ -153,32 +154,44 @@ fig.savefig(f"{FILENAME}-graph.png")
 # find index of frequency bin closest to stimulation frequency
 
 BASE_FREQ = 5.88
-HARMONEY_FREQ = 2
+HARMONEY_FREQS = np.array(range(4))+1
 ODDBALL_MODULATION = 5
 
-TARGET_FREQ = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQ 
+TARGET_FREQS = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQS
 RANGE_OF_TOPO_SEARCH = int(0.01 * sfreq)
-target_center = int(np.argmin(np.abs(freqs - TARGET_FREQ)))
 
-range_start = np.max([target_center - RANGE_OF_TOPO_SEARCH, NOISE_NEIGHBORS + NOISE_SKIP])
-range_end = target_center + RANGE_OF_TOPO_SEARCH
+def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
+    target_center = int(np.argmin(np.abs(freqs - target_freq)))
 
-# adding in the end because the arg is relative to the array
-i_bin_target_hz = np.argmax(snr_mean[range_start:range_end]) + range_start
+    range_start = np.max(
+        [target_center - RANGE_OF_TOPO_SEARCH, NOISE_NEIGHBORS + NOISE_SKIP])
+    range_end = target_center + RANGE_OF_TOPO_SEARCH
 
+    # adding in the end because the arg is relative to the array
+    i_bin_target_hz = np.argmax(snr_mean[range_start:range_end]) + range_start
 
-print(f"looking at freq {freqs[i_bin_target_hz]
-                         } with value of {snr_mean[i_bin_target_hz]}")
+    # get average SNR at 1 Hz for ALL channels
+    snrs_stim_hz = snrs[:, :, i_bin_target_hz]
+    return (freqs[i_bin_target_hz], snrs_stim_hz.mean(axis=0))
 
+freqs_with_chaverages = list(map(into_chaverage, TARGET_FREQS))
 
-# get average SNR at 1 Hz for ALL channels
-snrs_stim_hz = snrs[:, :, i_bin_target_hz]
-snrs_stim_hz_chaverage = snrs_stim_hz.mean(axis=0)
-
+upper_limit = np.max(np.array([t[1] for t in freqs_with_chaverages]).flatten())
 # plot SNR topography
-fig, ax = plt.subplots(1)
-ax.set_title(f"SNR at {freqs[i_bin_target_hz]} (F*{freqs[i_bin_target_hz]/BASE_FREQ*ODDBALL_MODULATION})")
-mne.viz.plot_topomap(snrs_stim_hz_chaverage, raw.info, vlim=(1, None), axes=ax)
-fig.savefig(f"{FILENAME}-topography.png")
+fig, axs = plt.subplots(2, 2,  sharex="none", sharey="none")
+fig.suptitle(f"clearity up to {upper_limit:.0f}")
+for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
+    
+    print(f"looking at freq {freq:.2f}")
 
-print(f"average SNR (all channels): {snrs_stim_hz_chaverage.mean()}")
+
+
+    ax.set_title(f"SNR at F*{freq/BASE_FREQ*ODDBALL_MODULATION:.0f} ({
+                 freq:.2f})")
+    mne.viz.plot_topomap(chaverage, raw.info,
+                         vlim=(1, upper_limit), axes=ax, show=False)
+
+    print(f"average SNR (all channels): {chaverage.mean()}")
+
+plt.show(block=True)
+fig.savefig(f"{FILENAME}-topography.png")
