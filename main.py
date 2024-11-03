@@ -3,7 +3,7 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_anoter_hebrew_vs_arabic_1"
+FILENAME = "udi_arabic_repeats"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
@@ -154,8 +154,10 @@ fig.savefig(f"{FILENAME}-graph.png")
 # find index of frequency bin closest to stimulation frequency
 
 BASE_FREQ = 5.88
-HARMONEY_FREQS = np.array(range(4))+1
+TOPO_WIDTH = 2
+TOPO_HEIGHT = 2
 ODDBALL_MODULATION = 5
+HARMONEY_FREQS = np.array(range(TOPO_WIDTH * TOPO_HEIGHT))+1
 
 TARGET_FREQS = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQS
 RANGE_OF_TOPO_SEARCH = int(0.01 * sfreq)
@@ -178,16 +180,14 @@ freqs_with_chaverages = list(map(into_chaverage, TARGET_FREQS))
 
 upper_limit = np.max(np.array([t[1] for t in freqs_with_chaverages]).flatten())
 # plot SNR topography
-fig, axs = plt.subplots(2, 2,  sharex="none", sharey="none")
+fig, axs = plt.subplots(TOPO_HEIGHT, TOPO_WIDTH,  sharex="none", sharey="none")
 fig.suptitle(f"clearity up to {upper_limit:.0f}")
 for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
     
     print(f"looking at freq {freq:.2f}")
-
-
-
     ax.set_title(f"SNR at F*{freq/BASE_FREQ*ODDBALL_MODULATION:.0f} ({
                  freq:.2f})")
+    
     mne.viz.plot_topomap(chaverage, raw.info,
                          vlim=(1, upper_limit), axes=ax, show=False)
 
