@@ -115,11 +115,11 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     mean_noise = np.pad(mean_noise, pad_width=pad_width,
                         constant_values=np.nan)
 
-    return psd / mean_noise
+    return np.square(psd) / np.square(mean_noise)
 
 
 # Average every 1/150 of the entire signal
-NOISE_NEIGHBORS = int(np.ceil(len(freqs)/150))
+NOISE_NEIGHBORS = int(np.ceil(len(freqs)/50))
 NOISE_SKIP = int(np.ceil(NOISE_NEIGHBORS/7))
 
 print(f'using {NOISE_NEIGHBORS} neighbors and skipping {NOISE_SKIP} bins')
