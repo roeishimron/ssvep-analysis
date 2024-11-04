@@ -173,8 +173,6 @@ axes[2].set(
     ylabel="SNR",
     xlim=[fmin, fmax],
 )
-fig.savefig(f"{FILENAME}-graph.png")
-
 
 # Find corresponding indices using mne.pick_types()
 
@@ -207,18 +205,18 @@ freqs_with_chaverages = list(map(into_chaverage, TARGET_FREQS))
 
 upper_limit = np.max(np.array([t[1] for t in freqs_with_chaverages]).flatten())
 # plot SNR topography
-fig, axs = plt.subplots(TOPO_HEIGHT, TOPO_WIDTH,  sharex="none", sharey="none")
+fig, axs = plt.subplots(TOPO_HEIGHT, TOPO_WIDTH,  sharex="none",
+                        sharey="none", label=f"{FILENAME}-topomap")
 fig.suptitle(f"clearity up to {upper_limit:.0f}")
 for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
-    
+
     print(f"looking at freq {freq:.2f}")
     ax.set_title(f"SNR at F*{freq/BASE_FREQ*ODDBALL_MODULATION:.0f} ({
                  freq:.2f})")
-    
+
     mne.viz.plot_topomap(chaverage, raw.info,
                          vlim=(1, upper_limit), axes=ax, show=False)
 
     print(f"average SNR (target channels): {chaverage[target_channel_indices].mean()}")
 
 plt.show(block=True)
-fig.savefig(f"{FILENAME}-topography.png")
