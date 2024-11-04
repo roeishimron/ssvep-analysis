@@ -156,7 +156,7 @@ axes[1].set(
 # draw the SNR of the target electrode (should be replaced with something cleverer, like RCA)
 TARGET_ELECTRODES = np.array(["T5", "O1"])
 target_channel_indices = np.argwhere(np.isin(np.array(channel_names),
-                      TARGET_ELECTRODES)).flatten()
+                                             TARGET_ELECTRODES)).flatten()
 target_snrs = snrs[:, target_channel_indices]
 
 # SNR spectrum
@@ -187,6 +187,7 @@ HARMONEY_FREQS = np.array(range(TOPO_WIDTH * TOPO_HEIGHT))+1
 TARGET_FREQS = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQS
 RANGE_OF_TOPO_SEARCH = int(0.01 * sfreq)
 
+
 def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
     target_center = int(np.argmin(np.abs(freqs - target_freq)))
 
@@ -200,6 +201,7 @@ def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
     # get average SNR at 1 Hz for ALL channels
     snrs_stim_hz = snrs[:, :, i_bin_target_hz]
     return (freqs[i_bin_target_hz], snrs_stim_hz.mean(axis=0))
+
 
 freqs_with_chaverages = list(map(into_chaverage, TARGET_FREQS))
 
@@ -217,6 +219,7 @@ for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
     mne.viz.plot_topomap(chaverage, raw.info,
                          vlim=(1, upper_limit), axes=ax, show=False)
 
-    print(f"average SNR (target channels): {chaverage[target_channel_indices].mean()}")
+    print(f"average SNR (target channels): {
+          chaverage[target_channel_indices].mean()}")
 
 plt.show(block=True)
