@@ -12,7 +12,8 @@ print("read data")
 raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
 
 raw.drop_channels(['Ax', 'Ay', 'Az'])
-raw.drop_channels(['X3:S1', 'X2:S2', 'X1:S3', 'Event', 'CM'])
+raw.drop_channels(['Event', 'CM'])
+raw.drop_channels([c for c in raw.ch_names if ":" in c])
 
 # Set common average reference
 raw.set_eeg_reference()
