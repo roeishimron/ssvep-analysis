@@ -37,6 +37,7 @@ raw.drop_channels(["Trigger"])
 tmin, tmax = 5, 58  # in s
 epochs = mne.Epochs(
     raw,
+    picks='data',
     events=events,
     tmin=tmin,
     tmax=tmax,
