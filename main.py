@@ -117,9 +117,12 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     return psd / mean_noise
 
 
-# Average every 3 bins
-NOISE_NEIGHBORS = 3
-NOISE_SKIP = 1
+# Average every 1/150 of the entire signal
+NOISE_NEIGHBORS = int(np.ceil(len(freqs)/150))
+NOISE_SKIP = int(np.ceil(NOISE_NEIGHBORS/7))
+
+print(f'using {NOISE_NEIGHBORS} neighbors and skipping {NOISE_SKIP} bins')
+
 snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
 
