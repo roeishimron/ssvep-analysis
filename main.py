@@ -60,6 +60,8 @@ spectrum = epochs.compute_psd(
     # n_per_seg=int(sfreq)*50,
     n_jobs=-1,
 )
+channel_names = raw.ch_names
+spectrum.reorder_channels(channel_names)
 psds, freqs = spectrum.get_data(return_freqs=True)
 
 print("got psds")
@@ -122,8 +124,8 @@ snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
 
 print("got snr")
-fig, axes = plt.subplots(2, 1, sharex="all", sharey="none", figsize=(8, 5))
-
+fig, axes = plt.subplots(3, 1, sharex="all", sharey="none", figsize=(
+    8, 5), label=f"{FILENAME}-spectrum")
 
 psds_plot = 10 * np.log10(psds)
 psds_mean = psds_plot.mean(axis=(0, 1))
@@ -144,6 +146,26 @@ axes[1].fill_between(
 )
 axes[1].set(
     title="SNR spectrum",
+    ylabel="SNR",
+    xlim=[fmin, fmax],
+)
+
+# draw the SNR of the target electrode (should be replaced with something cleverer, like RCA)
+TARGET_ELECTRODES = np.array(["T5", "O1"])
+target_channel_indices = np.argwhere(np.isin(np.array(channel_names),
+                      TARGET_ELECTRODES)).flatten()
+target_snrs = snrs[:, target_channel_indices]
+
+# SNR spectrum
+target_snr_mean = target_snrs.mean(axis=(0, 1))
+target_snr_std = target_snrs.std(axis=(0, 1))
+
+axes[2].plot(freqs, target_snr_mean, color="r")
+axes[2].fill_between(
+    freqs, target_snr_mean - target_snr_std, target_snr_mean + target_snr_std, color="r", alpha=0.1
+)
+axes[2].set(
+    title="Target SNR spectrum",
     xlabel="Frequency [Hz]",
     ylabel="SNR",
     xlim=[fmin, fmax],
@@ -193,7 +215,7 @@ for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
     mne.viz.plot_topomap(chaverage, raw.info,
                          vlim=(1, upper_limit), axes=ax, show=False)
 
-    print(f"average SNR (all channels): {chaverage.mean()}")
+    print(f"average SNR (target channels): {chaverage[target_channel_indices].mean()}")
 
 plt.show(block=True)
 fig.savefig(f"{FILENAME}-topography.png")
