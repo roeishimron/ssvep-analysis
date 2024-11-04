@@ -31,6 +31,7 @@ diffs = np.diff(events[:, 0], append=raw.last_samp)
 valids = np.argwhere(diffs > 1000).flatten()
 events = events[valids]
 print(f"found {len(events)} events")
+raw.drop_channels(["Trigger"])
 
 # Construct epochs
 tmin, tmax = 5, 58  # in s
