@@ -47,7 +47,7 @@ epochs = mne.Epochs(
 )
 
 # Calculate PSD
-fmin = 0.5
+fmin = 0.1
 fmax = 15.0
 sfreq = 300
 
@@ -64,7 +64,6 @@ spectrum = epochs.compute_psd(
 channel_names = raw.ch_names
 spectrum.reorder_channels(channel_names)
 psds, freqs = spectrum.get_data(return_freqs=True)
-
 print("got psds")
 
 
@@ -115,12 +114,10 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     mean_noise = np.pad(mean_noise, pad_width=pad_width,
                         constant_values=np.nan)
 
-    return np.square(psd) / np.square(mean_noise)
+    return psd / mean_noise
 
-
-# Average every 1/150 of the entire signal
-NOISE_NEIGHBORS = int(np.ceil(len(freqs)/50))
-NOISE_SKIP = int(np.ceil(NOISE_NEIGHBORS/7))
+NOISE_NEIGHBORS = 30
+NOISE_SKIP = 2
 
 print(f'using {NOISE_NEIGHBORS} neighbors and skipping {NOISE_SKIP} bins')
 
@@ -138,7 +135,7 @@ axes[0].plot(freqs, psds_mean, color="b")
 axes[0].fill_between(
     freqs, psds_mean - psds_std, psds_mean + psds_std, color="b", alpha=0.1
 )
-axes[0].set(title="PSD spectrum", ylabel="Power Spectral Density [dB]")
+axes[0].set(title="PSD spectrum", ylabel="V^2/Hz")
 
 # SNR spectrum
 snr_mean = snrs.mean(axis=(0, 1))
@@ -150,7 +147,7 @@ axes[1].fill_between(
 )
 axes[1].set(
     title="SNR spectrum",
-    ylabel="SNR",
+    ylabel="SNR [P/N]",
     xlim=[fmin, fmax],
 )
 
