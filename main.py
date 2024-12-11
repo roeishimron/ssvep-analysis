@@ -3,9 +3,15 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "udi_arabic_repeats"
+FILENAME = "roei_stripes_functional_10hz"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
+RECORDING_FREQUENCY = 300
+
+BASE_FREQ = 10
+TOPO_WIDTH = 3
+TOPO_HEIGHT = 2
+ODDBALL_MODULATION = 2
 
 print("read data")
 
@@ -14,56 +20,77 @@ raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
 raw.drop_channels(['Ax', 'Ay', 'Az'])
 raw.drop_channels(['Event', 'CM'])
 raw.drop_channels([c for c in raw.ch_names if ":" in c])
+raw.set_montage(montage='standard_1020')
+
+# raw.filter(1, 40)
+
+# detect events and edit
+events = mne.find_events(raw, stim_channel="Trigger", mask=255)
+raw.drop_channels(["Trigger"])
 
 # Set common average reference
 raw.set_eeg_reference()
 
-raw.set_montage(montage='standard_1020')
-
-# raw.pick(["T3", "T5", "O1", "O2", "T4", "T6", "Pz", "Cz", "Trigger"])
-
-# Not filtering
-
-# detect events and edit
-events = mne.find_events(raw, stim_channel="Trigger", mask=255)
 
 # Handle too close events:
 diffs = np.diff(events[:, 0], append=raw.last_samp)
 valids = np.argwhere(diffs > 1000).flatten()
 events = events[valids]
 print(f"found {len(events)} events")
-raw.drop_channels(["Trigger"])
 
 # Construct epochs
-tmin, tmax = 5, 58  # in s
+TRIAL_START, TRIAL_DURATION = 0, 50  # in s
+offset = 0.0
 epochs = mne.Epochs(
     raw,
     picks='data',
     events=events,
-    tmin=tmin,
-    tmax=tmax,
+    tmin=offset,
+    tmax=TRIAL_DURATION+offset,
     baseline=None,
     verbose=False,
 )
 
-# Calculate PSD
-fmin = 0.1
-fmax = 15.0
-sfreq = 300
 
-spectrum = epochs.compute_psd(
-    "welch",
-    n_fft=int(sfreq * (tmax - tmin)),
-    fmin=fmin,
-    fmax=fmax,
-    verbose=False,
-    # n_overlap=2048,
-    # n_per_seg=int(sfreq)*50,
-    n_jobs=-1,
-)
+# time-shifting parameters
+SCALE = 20
+A = 9
+
+# take f(x) into f(r(x))
+def exp_channel_time(c):
+    f_source = np.linspace(0, TRIAL_DURATION, c.shape[-1])
+    r_x = A*np.exp(f_source/SCALE) - A
+
+    return np.exp(np.interp(r_x, f_source, np.log(c+1)))-1
+
+# takes f(x) into f(t(x))
+def log_channel_time(c):
+    ERROR = 0.1
+    f_source = np.linspace(0, TRIAL_DURATION, c.shape[-1]) + ERROR
+    t_x = SCALE*np.log(f_source/A+1)
+    return np.log(np.interp(t_x, f_source, np.exp(c)))
+
+
+def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing.NDArray]:
+    TRIAL_SAMPLES = TRIAL_DURATION*RECORDING_FREQUENCY
+
+    data = np.average(data, axis=0)
+    data = data[:, 0:TRIAL_SAMPLES]
+
+    applied = np.apply_along_axis(log_channel_time, -1, arr=data)
+
+    freqs = np.fft.rfftfreq(applied.shape[-1], d=1/RECORDING_FREQUENCY)*2
+    transformed = np.abs(np.fft.rfft(applied))**2/freqs
+
+    return (transformed, freqs)
+
+
+# Calculate PSD
+fmin = 1
+fmax = (BASE_FREQ/ODDBALL_MODULATION) * 6
+
 channel_names = raw.ch_names
-spectrum.reorder_channels(channel_names)
-psds, freqs = spectrum.get_data(return_freqs=True)
+psds, freqs = into_spectrum(epochs.get_data())
 print("got psds")
 
 
@@ -102,6 +129,7 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
     # Calculate the mean of the neighboring frequencies by convolving with the
     # averaging kernel.
+    # applying along each electrode
     mean_noise = np.apply_along_axis(
         lambda psd_: np.convolve(psd_, averaging_kernel, mode="valid"), axis=-1, arr=psd
     )
@@ -116,6 +144,7 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
     return psd / mean_noise
 
+
 NOISE_NEIGHBORS = 7
 NOISE_SKIP = 2
 
@@ -129,8 +158,8 @@ fig, axes = plt.subplots(3, 1, sharex="all", sharey="none", figsize=(
     8, 5), label=f"{FILENAME}-spectrum")
 
 psds_plot = 10 * np.log10(psds)
-psds_mean = psds_plot.mean(axis=(0, 1))
-psds_std = psds_plot.std(axis=(0, 1))
+psds_mean = psds_plot.mean(axis=0)
+psds_std = psds_plot.std(axis=0)
 axes[0].plot(freqs, psds_mean, color="b")
 axes[0].fill_between(
     freqs, psds_mean - psds_std, psds_mean + psds_std, color="b", alpha=0.1
@@ -138,8 +167,8 @@ axes[0].fill_between(
 axes[0].set(title="PSD spectrum", ylabel="V^2/Hz")
 
 # SNR spectrum
-snr_mean = snrs.mean(axis=(0, 1))
-snr_std = snrs.std(axis=(0, 1))
+snr_mean = snrs.mean(axis=0)
+snr_std = snrs.std(axis=0)
 
 axes[1].plot(freqs, snr_mean, color="r")
 axes[1].fill_between(
@@ -152,14 +181,14 @@ axes[1].set(
 )
 
 # draw the SNR of the target electrode (should be replaced with something cleverer, like RCA)
-TARGET_ELECTRODES = np.array(["T5", "O1"])
+TARGET_ELECTRODES = np.array(["Pz", "O1", "O2"])
 target_channel_indices = np.argwhere(np.isin(np.array(channel_names),
                                              TARGET_ELECTRODES)).flatten()
-target_snrs = snrs[:, target_channel_indices]
+target_snrs = snrs[target_channel_indices]
 
 # SNR spectrum
-target_snr_mean = target_snrs.mean(axis=(0, 1))
-target_snr_std = target_snrs.std(axis=(0, 1))
+target_snr_mean = target_snrs.mean(axis=0)
+target_snr_std = target_snrs.std(axis=0)
 
 axes[2].plot(freqs, target_snr_mean, color="r")
 axes[2].fill_between(
@@ -176,29 +205,26 @@ axes[2].set(
 
 # find index of frequency bin closest to stimulation frequency
 
-BASE_FREQ = 5.88
-TOPO_WIDTH = 2
-TOPO_HEIGHT = 2
-ODDBALL_MODULATION = 5
+
 HARMONEY_FREQS = np.array(range(TOPO_WIDTH * TOPO_HEIGHT))+1
 
 TARGET_FREQS = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQS
-RANGE_OF_TOPO_SEARCH = int(0.01 * sfreq)
+RANGE_OF_TOPO_SEARCH = int(0.002 * RECORDING_FREQUENCY * BASE_FREQ)
 
 
 def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
     target_center = int(np.argmin(np.abs(freqs - target_freq)))
 
-    range_start = np.max(
-        [target_center - RANGE_OF_TOPO_SEARCH, NOISE_NEIGHBORS + NOISE_SKIP])
+    range_start = np.max([target_center - RANGE_OF_TOPO_SEARCH, 0])
     range_end = target_center + RANGE_OF_TOPO_SEARCH
 
     # adding in the end because the arg is relative to the array
-    i_bin_target_hz = np.argmax(snr_mean[range_start:range_end]) + range_start
+    i_bin_target_hz = np.nanargmax(
+        snr_mean[range_start:range_end]) + range_start
 
     # get average SNR at 1 Hz for ALL channels
-    snrs_stim_hz = snrs[:, :, i_bin_target_hz]
-    return (freqs[i_bin_target_hz], snrs_stim_hz.mean(axis=0))
+    snrs_stim_hz = snrs[:, i_bin_target_hz]
+    return (freqs[i_bin_target_hz], snrs_stim_hz)
 
 
 freqs_with_chaverages = list(map(into_chaverage, TARGET_FREQS))
