@@ -220,7 +220,7 @@ def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
 
     # adding in the end because the arg is relative to the array
     i_bin_target_hz = np.nanargmax(
-        snr_mean[range_start:range_end]) + range_start
+        target_snr_mean[range_start:range_end]) + range_start
 
     # get average SNR at 1 Hz for ALL channels
     snrs_stim_hz = snrs[:, i_bin_target_hz]
