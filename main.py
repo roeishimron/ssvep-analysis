@@ -3,15 +3,20 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_stripes_functional_10hz"
+FILENAME = "roei_dots_p2_oddball_10hz"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 RECORDING_FREQUENCY = 300
 
 BASE_FREQ = 10
-TOPO_WIDTH = 3
-TOPO_HEIGHT = 2
-ODDBALL_MODULATION = 2
+TOPO_WIDTH = 4
+TOPO_HEIGHT = 4
+ODDBALL_MODULATION = 8
+TIME_MANIPULATED = False
+TARGET_ELECTRODES = np.array(["Pz", "O1", "O2"])
+BAD_ELECTRODES = []
+SUM_HARMONICS_UNTIL = 23
+TRIAL_START, TRIAL_DURATION = 0, 45  # in s
 
 print("read data")
 
@@ -20,6 +25,7 @@ raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
 raw.drop_channels(['Ax', 'Ay', 'Az'])
 raw.drop_channels(['Event', 'CM'])
 raw.drop_channels([c for c in raw.ch_names if ":" in c])
+raw.drop_channels(BAD_ELECTRODES)
 raw.set_montage(montage='standard_1020')
 
 # raw.filter(1, 40)
@@ -39,14 +45,12 @@ events = events[valids]
 print(f"found {len(events)} events")
 
 # Construct epochs
-TRIAL_START, TRIAL_DURATION = 0, 50  # in s
-offset = 0.0
 epochs = mne.Epochs(
     raw,
     picks='data',
     events=events,
-    tmin=offset,
-    tmax=TRIAL_DURATION+offset,
+    tmin=TRIAL_START,
+    tmax=TRIAL_DURATION,
     baseline=None,
     verbose=False,
 )
@@ -77,17 +81,18 @@ def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing
     data = np.average(data, axis=0)
     data = data[:, 0:TRIAL_SAMPLES]
 
-    applied = np.apply_along_axis(log_channel_time, -1, arr=data)
+    if TIME_MANIPULATED:
+        data = np.apply_along_axis(log_channel_time, -1, arr=data)
 
-    freqs = np.fft.rfftfreq(applied.shape[-1], d=1/RECORDING_FREQUENCY)*2
-    transformed = np.abs(np.fft.rfft(applied))**2/freqs
+    freqs = np.fft.rfftfreq(data.shape[-1], d=1/RECORDING_FREQUENCY)*2
+    transformed = np.abs(np.fft.rfft(data))**2/freqs
 
     return (transformed, freqs)
 
 
 # Calculate PSD
-fmin = 1
-fmax = (BASE_FREQ/ODDBALL_MODULATION) * 6
+fmin = 0.5
+fmax = (BASE_FREQ/ODDBALL_MODULATION) * 16 * 2
 
 channel_names = raw.ch_names
 psds, freqs = into_spectrum(epochs.get_data())
@@ -181,7 +186,6 @@ axes[1].set(
 )
 
 # draw the SNR of the target electrode (should be replaced with something cleverer, like RCA)
-TARGET_ELECTRODES = np.array(["Pz", "O1", "O2"])
 target_channel_indices = np.argwhere(np.isin(np.array(channel_names),
                                              TARGET_ELECTRODES)).flatten()
 target_snrs = snrs[target_channel_indices]
@@ -209,7 +213,7 @@ axes[2].set(
 HARMONEY_FREQS = np.array(range(TOPO_WIDTH * TOPO_HEIGHT))+1
 
 TARGET_FREQS = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQS
-RANGE_OF_TOPO_SEARCH = int(0.002 * RECORDING_FREQUENCY * BASE_FREQ)
+RANGE_OF_TOPO_SEARCH = int(0.001 * RECORDING_FREQUENCY * BASE_FREQ)
 
 
 def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
@@ -222,7 +226,7 @@ def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
     i_bin_target_hz = np.nanargmax(
         target_snr_mean[range_start:range_end]) + range_start
 
-    # get average SNR at 1 Hz for ALL channels
+    # get average SNR at target Hz for ALL channels
     snrs_stim_hz = snrs[:, i_bin_target_hz]
     return (freqs[i_bin_target_hz], snrs_stim_hz)
 
@@ -245,5 +249,13 @@ for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
 
     print(f"average SNR (target channels): {
           chaverage[target_channel_indices].mean()}")
+
+
+# for the grand_average
+SBA_TARGET_FREQS = [BASE_FREQ/ODDBALL_MODULATION * i for i in range(1, SUM_HARMONICS_UNTIL+1)
+                    if i % ODDBALL_MODULATION != 0]
+average_chaverage = np.average(
+    np.array(list(map(lambda f: into_chaverage(f)[1], SBA_TARGET_FREQS))), 0)
+mne.viz.plot_topomap(average_chaverage, raw.info, show=False)
 
 plt.show(block=True)
