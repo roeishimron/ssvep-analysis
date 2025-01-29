@@ -239,16 +239,9 @@ RANGE_OF_TOPO_SEARCH = int(0.001 * RECORDING_FREQUENCY * BASE_FREQ)
 def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
     target_center = int(np.argmin(np.abs(freqs - target_freq)))
 
-    range_start = np.max([target_center - RANGE_OF_TOPO_SEARCH, 0])
-    range_end = target_center + RANGE_OF_TOPO_SEARCH
-
-    # adding in the end because the arg is relative to the array
-    i_bin_target_hz = np.nanargmax(
-        target_snr_mean[range_start:range_end]) + range_start
-
     # get average SNR at target Hz for ALL channels
-    snrs_stim_hz = snrs[:, i_bin_target_hz]
-    return (freqs[i_bin_target_hz], snrs_stim_hz)
+    snrs_stim_hz = snrs[:, target_center]
+    return (freqs[target_center], snrs_stim_hz)
 
 
 freqs_with_chaverages = list(map(into_chaverage, TARGET_FREQS))
