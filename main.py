@@ -3,21 +3,21 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_dots_p2_oddball_10hz"
+FILENAME = "roei_dots_p15_8_oddball_10hz"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
-RECORDING_FREQUENCY = 300
 
-BASE_FREQ = 10
-TOPO_WIDTH = 4
-TOPO_HEIGHT = 4
-ODDBALL_MODULATION = 8
+BASE_FREQ = 20
+ODDBALL_MODULATION = 5
 TIME_MANIPULATED = False
-TARGET_ELECTRODES = np.array(["Pz", "O1", "O2"])
+TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
-SUM_HARMONICS_UNTIL = 23
+SUM_HARMONICS_UNTIL = 12
 TRIAL_START, TRIAL_DURATION = 0, 45  # in s
 
+TOPO_WIDTH = 4
+TOPO_HEIGHT = 4
+RECORDING_FREQUENCY = 300
 print("read data")
 
 raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
@@ -61,6 +61,8 @@ SCALE = 20
 A = 9
 
 # take f(x) into f(r(x))
+
+
 def exp_channel_time(c):
     f_source = np.linspace(0, TRIAL_DURATION, c.shape[-1])
     r_x = A*np.exp(f_source/SCALE) - A
@@ -68,6 +70,8 @@ def exp_channel_time(c):
     return np.exp(np.interp(r_x, f_source, np.log(c+1)))-1
 
 # takes f(x) into f(t(x))
+
+
 def log_channel_time(c):
     ERROR = 0.1
     f_source = np.linspace(0, TRIAL_DURATION, c.shape[-1]) + ERROR
