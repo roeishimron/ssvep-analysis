@@ -163,7 +163,7 @@ snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
 
 print("got snr")
-fig, axes = plt.subplots(3, 1, sharex="all", sharey="none", figsize=(
+_, axes = plt.subplots(4, 1, sharex="all", sharey="none", figsize=(
     8, 5), label=f"{FILENAME}-spectrum")
 
 psds_plot = 10 * np.log10(psds)
@@ -204,10 +204,26 @@ axes[2].fill_between(
 )
 axes[2].set(
     title="Target SNR spectrum",
-    xlabel="Frequency [Hz]",
     ylabel="SNR",
     xlim=[fmin, fmax],
 )
+
+# Amplitudes spectrum
+amplitudes_plot = 10 * np.log10(amplitudes)
+amplitudes_mean = amplitudes_plot.mean(axis=0)
+amplitudes_std = amplitudes_plot.std(axis=0)
+
+axes[3].plot(freqs, amplitudes_mean, color="g")
+axes[3].fill_between(
+    freqs, amplitudes_mean - amplitudes_std, amplitudes_mean + amplitudes_std, color="g", alpha=0.1
+)
+axes[3].set(
+    title="Amplitudes spectrum",
+    xlabel="Frequency [Hz]",
+    ylabel="microV (logscale)",
+    xlim=[fmin, fmax],
+)
+
 
 # Find corresponding indices using mne.pick_types()
 
