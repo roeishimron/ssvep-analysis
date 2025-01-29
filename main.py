@@ -79,19 +79,17 @@ def log_channel_time(c):
     return np.log(np.interp(t_x, f_source, np.exp(c)))
 
 
-def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing.NDArray]:
-    TRIAL_SAMPLES = TRIAL_DURATION*RECORDING_FREQUENCY
-
+def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing.NDArray, np.typing.NDArray]:
     data = np.average(data, axis=0)
-    data = data[:, 0:TRIAL_SAMPLES]
 
     if TIME_MANIPULATED:
         data = np.apply_along_axis(log_channel_time, -1, arr=data)
 
-    freqs = np.fft.rfftfreq(data.shape[-1], d=1/RECORDING_FREQUENCY)*2
-    transformed = np.abs(np.fft.rfft(data))**2/freqs
+    freqs = np.fft.rfftfreq(data.shape[-1], d=1/RECORDING_FREQUENCY)
+    amplitudes = np.abs(np.fft.rfft(data))
+    transformed = amplitudes**2/freqs
 
-    return (transformed, freqs)
+    return (transformed, freqs, amplitudes)
 
 
 # Calculate PSD
