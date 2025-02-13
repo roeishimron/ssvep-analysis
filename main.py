@@ -12,8 +12,10 @@ ODDBALL_MODULATION = 5
 TIME_MANIPULATED = False
 TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
-SUM_HARMONICS_UNTIL = 12
-TRIAL_START, TRIAL_DURATION = 0, 45  # in s
+SUM_HARMONICS_UNTIL = 10
+TRIAL_START, TRIAL_DURATION = 0, 40  # in s
+TRIALS_RANGE = (0,3)
+
 
 TOPO_WIDTH = 4
 TOPO_HEIGHT = 4
@@ -28,8 +30,6 @@ raw.drop_channels([c for c in raw.ch_names if ":" in c])
 raw.drop_channels(BAD_ELECTRODES)
 raw.set_montage(montage='standard_1020')
 
-# raw.filter(1, 40)
-
 # detect events and edit
 events = mne.find_events(raw, stim_channel="Trigger", mask=255)
 raw.drop_channels(["Trigger"])
@@ -41,7 +41,7 @@ raw.set_eeg_reference()
 # Handle too close events:
 diffs = np.diff(events[:, 0], append=raw.last_samp)
 valids = np.argwhere(diffs > 1000).flatten()
-events = events[valids]
+events = events[valids][TRIALS_RANGE[0]:TRIALS_RANGE[1]]
 print(f"found {len(events)} events")
 
 # Construct epochs
