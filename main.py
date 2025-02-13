@@ -87,9 +87,9 @@ def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing
 
     freqs = np.fft.rfftfreq(data.shape[-1], d=1/RECORDING_FREQUENCY)
     amplitudes = np.abs(np.fft.rfft(data))
-    transformed = amplitudes**2/freqs
+    psd = amplitudes**2/freqs
 
-    return (transformed, freqs, amplitudes)
+    return (psd, freqs, amplitudes)
 
 
 # Calculate PSD
