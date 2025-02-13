@@ -3,7 +3,7 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_dots_p15_8_oddball_10hz"
+FILENAME = "roei_20hz"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
@@ -263,12 +263,60 @@ for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
     print(f"average SNR (target channels): {
           chaverage[target_channel_indices].mean()}")
 
-
+AC_FREQ = 50
 # for the grand_average
 SBA_TARGET_FREQS = [BASE_FREQ/ODDBALL_MODULATION * i for i in range(1, SUM_HARMONICS_UNTIL+1)
-                    if i % ODDBALL_MODULATION != 0]
-average_chaverage = np.average(
-    np.array(list(map(lambda f: into_chaverage(f)[1], SBA_TARGET_FREQS))), 0)
-mne.viz.plot_topomap(average_chaverage, raw.info, show=False)
+                    if i % ODDBALL_MODULATION != 0 and BASE_FREQ/ODDBALL_MODULATION * i != AC_FREQ]
+
+
+def extract_sba_average(data: np.typing.NDArray, target_freqs=SBA_TARGET_FREQS):
+    _, freqs, amps = into_spectrum(data)
+
+    harmonic_indices = np.array(
+        [np.argmin(np.abs(freqs - t)) for t in target_freqs])
+    return np.average(amps[:, harmonic_indices], 1)
+
+
+# print the SBA
+mne.viz.plot_topomap(extract_sba_average(microvolt_data), raw.info, show=False)
+
+# get the sba relative to the recording time. Should be monotonically increasing.
+SAMPLE_REUDCTION = 10
+REDUCED_TIMES = np.array(
+    list(range(100, microvolt_data.shape[2]+SAMPLE_REUDCTION, SAMPLE_REUDCTION)))
+
+SMOOTH_KERNEL_SIZE = int(RECORDING_FREQUENCY / SAMPLE_REUDCTION)
+
+def generate_smoothed_clearence(frequencies: np.typing.NDArray, smooth_kernel_size: int) -> np.typing.NDArray:
+
+    sba_data_per_time = np.array(
+        [extract_sba_average(microvolt_data[:, :, :t], frequencies) for t in REDUCED_TIMES])
+
+    target_sba_average = np.average(
+        sba_data_per_time[:, target_channel_indices], 1)
+    sba_average = np.average(sba_data_per_time, 1)
+
+    target_clearence = target_sba_average - sba_average
+
+    smoothed_target_clearence = np.convolve(target_clearence, np.ones(
+        smooth_kernel_size)/smooth_kernel_size, "valid")
+
+    return smoothed_target_clearence
+
+
+smoothed_carrier_target_clearence = generate_smoothed_clearence(
+    [BASE_FREQ * (i+1) for i in range(3)], SMOOTH_KERNEL_SIZE)
+smoothed_target_clearence = generate_smoothed_clearence(
+    SBA_TARGET_FREQS, SMOOTH_KERNEL_SIZE)
+
+smoothed_times = REDUCED_TIMES[int(SMOOTH_KERNEL_SIZE/2):
+                       -int(SMOOTH_KERNEL_SIZE/2) + 1] / RECORDING_FREQUENCY
+
+fig, ax = plt.subplots()
+fig.suptitle("SBA development with accumilation time")
+ax.plot(smoothed_times, smoothed_target_clearence, label="target")
+ax.plot(smoothed_times, smoothed_carrier_target_clearence, label="carrier")
+ax.plot(smoothed_times[:-1], np.diff(smoothed_target_clearence), label="carrier diff")
+plt.legend()
 
 plt.show(block=True)
