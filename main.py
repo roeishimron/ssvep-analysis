@@ -12,9 +12,9 @@ ODDBALL_MODULATION = 5
 TIME_MANIPULATED = False
 TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
-SUM_HARMONICS_UNTIL = 10
-TRIAL_START, TRIAL_DURATION = 0, 40  # in s
-TRIALS_RANGE = (0,3)
+SUM_HARMONICS_UNTIL = ODDBALL_MODULATION * 3
+TRIAL_START, TRIAL_DURATION = 0, 44  # in s
+TRIALS_RANGE = (1,3)
 
 
 TOPO_WIDTH = 4
@@ -97,8 +97,8 @@ fmin = 0.5
 fmax = (BASE_FREQ/ODDBALL_MODULATION) * 16 * 2
 
 channel_names = raw.ch_names
-milivolt_data = epochs.get_data()
-microvolt_data = np.apply_along_axis(lambda n: n*1000, 1, milivolt_data)
+microvolt_data = epochs.get_data(units="uV")
+
 psds, freqs, amplitudes = into_spectrum(microvolt_data)
 print("got psds")
 
