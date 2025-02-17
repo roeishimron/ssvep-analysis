@@ -96,7 +96,7 @@ fmin = 0.5
 fmax = (BASE_FREQ/ODDBALL_MODULATION) * 16 * 2
 
 channel_names = raw.ch_names
-microvolt_data = epochs.get_data(units="uV")
+microvolt_data = epochs.get_data(units="mV")
 
 psds, freqs, amplitudes = into_spectrum(microvolt_data)
 print("got psds")
