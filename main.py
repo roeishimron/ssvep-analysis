@@ -91,7 +91,6 @@ def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing
 
     return (psd, freqs, amplitudes)
 
-
 # Calculate PSD
 fmin = 0.5
 fmax = (BASE_FREQ/ODDBALL_MODULATION) * 16 * 2
@@ -287,7 +286,7 @@ REDUCED_TIMES = np.array(
 
 SMOOTH_KERNEL_SIZE = int(RECORDING_FREQUENCY / SAMPLE_REUDCTION)
 
-def generate_smoothed_clearence(frequencies: np.typing.NDArray, smooth_kernel_size: int) -> np.typing.NDArray:
+def generate_smoothed_clearity(frequencies: np.typing.NDArray, smooth_kernel_size: int) -> np.typing.NDArray:
 
     sba_data_per_time = np.array(
         [extract_sba_average(microvolt_data[:, :, :t], frequencies) for t in REDUCED_TIMES])
@@ -296,17 +295,17 @@ def generate_smoothed_clearence(frequencies: np.typing.NDArray, smooth_kernel_si
         sba_data_per_time[:, target_channel_indices], 1)
     sba_average = np.average(sba_data_per_time, 1)
 
-    target_clearence = target_sba_average - sba_average
+    target_clearity = target_sba_average - sba_average
 
-    smoothed_target_clearence = np.convolve(target_clearence, np.ones(
+    smoothed_target_clearity = np.convolve(target_clearity, np.ones(
         smooth_kernel_size)/smooth_kernel_size, "valid")
 
-    return smoothed_target_clearence
+    return smoothed_target_clearity
 
 
-smoothed_carrier_target_clearence = generate_smoothed_clearence(
+smoothed_carrier_target_clearity = generate_smoothed_clearity(
     [BASE_FREQ * (i+1) for i in range(3)], SMOOTH_KERNEL_SIZE)
-smoothed_target_clearence = generate_smoothed_clearence(
+smoothed_target_clearity = generate_smoothed_clearity(
     SBA_TARGET_FREQS, SMOOTH_KERNEL_SIZE)
 
 smoothed_times = REDUCED_TIMES[int(SMOOTH_KERNEL_SIZE/2):
@@ -314,9 +313,9 @@ smoothed_times = REDUCED_TIMES[int(SMOOTH_KERNEL_SIZE/2):
 
 fig, ax = plt.subplots()
 fig.suptitle("SBA development with accumilation time")
-ax.plot(smoothed_times, smoothed_target_clearence, label="target")
-ax.plot(smoothed_times, smoothed_carrier_target_clearence, label="carrier")
-ax.plot(smoothed_times[:-1], np.diff(smoothed_target_clearence), label="carrier diff")
+ax.plot(smoothed_times, smoothed_target_clearity, label="target")
+ax.plot(smoothed_times, smoothed_carrier_target_clearity, label="carrier")
+ax.plot(smoothed_times[:-1], np.diff(smoothed_target_clearity), label="carrier diff")
 plt.legend()
 
 plt.show(block=True)
