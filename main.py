@@ -3,18 +3,20 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_20hz"
+FILENAME = "roei_area_6hz_2ob_reversed"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
-BASE_FREQ = 20
-ODDBALL_MODULATION = 5
+BASE_FREQ = 6
+ODDBALL_MODULATION = 2
 TIME_MANIPULATED = False
 TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
-SUM_HARMONICS_UNTIL = ODDBALL_MODULATION * 3
-TRIAL_START, TRIAL_DURATION = 0, 44  # in s
-TRIALS_RANGE = (1,3)
+SUM_HARMONICS_UNTIL = 1
+AMOUNT_OF_BLOCKS = 7
+TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*16-1 # in s
+BLOCK_ELECTRODES = ["Pz", "O1", "O2", "T5", "P3", "P4", "T6"]
+TRIALS_RANGE = (0, 3)
 
 
 TOPO_WIDTH = 4
@@ -90,6 +92,7 @@ def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing
     psd = amplitudes**2/freqs
 
     return (psd, freqs, amplitudes)
+
 
 # Calculate PSD
 fmin = 0.5
@@ -264,8 +267,8 @@ for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
 
 AC_FREQ = 50
 # for the grand_average
-SBA_TARGET_FREQS = [BASE_FREQ/ODDBALL_MODULATION * i for i in range(1, SUM_HARMONICS_UNTIL+1)
-                    if i % ODDBALL_MODULATION != 0 and BASE_FREQ/ODDBALL_MODULATION * i != AC_FREQ]
+SBA_TARGET_FREQS = np.array([BASE_FREQ/ODDBALL_MODULATION * i for i in range(1, SUM_HARMONICS_UNTIL+1)
+                             if i % ODDBALL_MODULATION != 0 and BASE_FREQ/ODDBALL_MODULATION * i != AC_FREQ])
 
 
 def extract_sba_average(data: np.typing.NDArray, target_freqs=SBA_TARGET_FREQS):
@@ -277,45 +280,47 @@ def extract_sba_average(data: np.typing.NDArray, target_freqs=SBA_TARGET_FREQS):
 
 
 # print the SBA
-mne.viz.plot_topomap(extract_sba_average(microvolt_data), raw.info, show=False)
+mne.viz.plot_topomap(extract_sba_average(
+    microvolt_data, SBA_TARGET_FREQS), raw.info, show=False)
 
-# get the sba relative to the recording time. Should be monotonically increasing.
-SAMPLE_REUDCTION = 10
-REDUCED_TIMES = np.array(
-    list(range(100, microvolt_data.shape[2]+SAMPLE_REUDCTION, SAMPLE_REUDCTION)))
+COMPARE_TARGET_TO = 0.5
 
-SMOOTH_KERNEL_SIZE = int(RECORDING_FREQUENCY / SAMPLE_REUDCTION)
-
-def generate_smoothed_clearity(frequencies: np.typing.NDArray, smooth_kernel_size: int) -> np.typing.NDArray:
-
-    sba_data_per_time = np.array(
-        [extract_sba_average(microvolt_data[:, :, :t], frequencies) for t in REDUCED_TIMES])
-
-    target_sba_average = np.average(
-        sba_data_per_time[:, target_channel_indices], 1)
-    sba_average = np.average(sba_data_per_time, 1)
-
-    target_clearity = target_sba_average - sba_average
-
-    smoothed_target_clearity = np.convolve(target_clearity, np.ones(
-        smooth_kernel_size)/smooth_kernel_size, "valid")
-
-    return smoothed_target_clearity
+# Calculate the target voltage vs noise voltage
+# TODO: Consider presenting it by block
+mne.viz.plot_topomap(extract_sba_average(microvolt_data, SBA_TARGET_FREQS)
+                     - extract_sba_average(microvolt_data,
+                                           SBA_TARGET_FREQS+COMPARE_TARGET_TO)/2
+                     - extract_sba_average(microvolt_data,
+                                           SBA_TARGET_FREQS-COMPARE_TARGET_TO)/2,
+                     raw.info, show=False)
 
 
-smoothed_carrier_target_clearity = generate_smoothed_clearity(
-    [BASE_FREQ * (i+1) for i in range(3)], SMOOTH_KERNEL_SIZE)
-smoothed_target_clearity = generate_smoothed_clearity(
-    SBA_TARGET_FREQS, SMOOTH_KERNEL_SIZE)
+# calculate the coherence of stimuli to coherence of signal
+TRIAL_MARGIN = 1
+BLOCK_SIZE = int((TRIAL_DURATION+1)/AMOUNT_OF_BLOCKS - 2*TRIAL_MARGIN)
 
-smoothed_times = REDUCED_TIMES[int(SMOOTH_KERNEL_SIZE/2):
-                       -int(SMOOTH_KERNEL_SIZE/2) + 1] / RECORDING_FREQUENCY
+# TODO: Convert to list
+BLOCK_ELECTRODE_INDICES = np.array([i for i in range(
+    len(raw.info["chs"])) if raw.info["chs"][i]["ch_name"] in BLOCK_ELECTRODES])
+
+block_diffs = []
+for i in range(AMOUNT_OF_BLOCKS):
+    start = RECORDING_FREQUENCY*(i*(BLOCK_SIZE+2*TRIAL_MARGIN))
+    current_data = microvolt_data[:, :,
+                                  start:start+BLOCK_SIZE*RECORDING_FREQUENCY]
+    block_data = current_data[:, BLOCK_ELECTRODE_INDICES, :]
+
+    target_block_sba = np.average(extract_sba_average(
+        block_data, SBA_TARGET_FREQS), axis=0)
+    target_block_noise = np.average(extract_sba_average(
+        block_data, SBA_TARGET_FREQS+COMPARE_TARGET_TO)/2
+        + extract_sba_average(block_data, SBA_TARGET_FREQS - COMPARE_TARGET_TO)/2)
+
+    block_diffs.append(target_block_sba - target_block_noise)
 
 fig, ax = plt.subplots()
-fig.suptitle("SBA development with accumilation time")
-ax.plot(smoothed_times, smoothed_target_clearity, label="target")
-ax.plot(smoothed_times, smoothed_carrier_target_clearity, label="carrier")
-ax.plot(smoothed_times[:-1], np.diff(smoothed_target_clearity), label="carrier diff")
-plt.legend()
+fig.suptitle("SBA coherence at each block")
+ax.plot(np.arange(AMOUNT_OF_BLOCKS) *
+        (BLOCK_SIZE+2*TRIAL_MARGIN), np.array(block_diffs))
 
 plt.show(block=True)
