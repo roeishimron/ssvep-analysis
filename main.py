@@ -3,18 +3,18 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_area_6hz_2ob_reversed"
+FILENAME = "roei_area_8hz_3ob_12-24"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
-BASE_FREQ = 6
-ODDBALL_MODULATION = 2
+BASE_FREQ = 8
+ODDBALL_MODULATION = 3
 TIME_MANIPULATED = False
 TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
 AMOUNT_OF_BLOCKS = 7
-TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*16-1 # in s
+TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*15-1 # in s
 BLOCK_ELECTRODES = ["Pz", "O1", "O2", "T5", "P3", "P4", "T6"]
 TRIALS_RANGE = (0, 3)
 
