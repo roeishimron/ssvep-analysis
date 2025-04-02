@@ -14,7 +14,7 @@ TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
 AMOUNT_OF_BLOCKS = 7
-TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*16-1 # in s
+TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*16-1  # in s
 BLOCK_ELECTRODES = ["Pz", "O1", "O2", "T5", "P3", "P4", "T6"]
 TRIALS_RANGE = (0, 3)
 
@@ -81,7 +81,9 @@ def log_channel_time(c):
     return np.log(np.interp(t_x, f_source, np.exp(c)))
 
 
-def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray, np.typing.NDArray, np.typing.NDArray]:
+def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray,
+                                                    np.typing.NDArray,
+                                                    np.typing.NDArray]:
     data = np.average(data, axis=0)
 
     if TIME_MANIPULATED:
