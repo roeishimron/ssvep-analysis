@@ -3,18 +3,18 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_area_6hz_2ob_reversed"
+FILENAME = "roei_noisy_circle_8hz_3ob_7blk"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
-BASE_FREQ = 6
-ODDBALL_MODULATION = 2
+BASE_FREQ = 8
+ODDBALL_MODULATION = 3
 TIME_MANIPULATED = False
 TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
 AMOUNT_OF_BLOCKS = 7
-TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*16-1  # in s
+TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*15-1  # in s
 BLOCK_ELECTRODES = ["Pz", "O1", "O2", "T5", "P3", "P4", "T6"]
 TRIALS_RANGE = (0, 3)
 
@@ -287,42 +287,41 @@ mne.viz.plot_topomap(extract_sba_average(
 
 COMPARE_TARGET_TO = 0.5
 
-# Calculate the target voltage vs noise voltage
-# TODO: Consider presenting it by block
-mne.viz.plot_topomap(extract_sba_average(microvolt_data, SBA_TARGET_FREQS)
-                     - extract_sba_average(microvolt_data,
-                                           SBA_TARGET_FREQS+COMPARE_TARGET_TO)/2
-                     - extract_sba_average(microvolt_data,
-                                           SBA_TARGET_FREQS-COMPARE_TARGET_TO)/2,
-                     raw.info, show=False)
-
+fig, axs = plt.subplots(1, AMOUNT_OF_BLOCKS,  sharex="none",
+                        sharey="none", label=f"{FILENAME}-target-vs-noise-sba-per-block")
 
 # calculate the coherence of stimuli to coherence of signal
 TRIAL_MARGIN = 1
 BLOCK_SIZE = int((TRIAL_DURATION+1)/AMOUNT_OF_BLOCKS - 2*TRIAL_MARGIN)
 
-# TODO: Convert to list
 BLOCK_ELECTRODE_INDICES = np.array([i for i in range(
     len(raw.info["chs"])) if raw.info["chs"][i]["ch_name"] in BLOCK_ELECTRODES])
 
-block_diffs = []
-for i in range(AMOUNT_OF_BLOCKS):
-    start = RECORDING_FREQUENCY*(i*(BLOCK_SIZE+2*TRIAL_MARGIN))
+block_target = []
+block_noise = []
+
+for (i, ax) in enumerate(axs):
+    start = int(RECORDING_FREQUENCY*(i*(BLOCK_SIZE+2*TRIAL_MARGIN)+TRIAL_MARGIN))
     current_data = microvolt_data[:, :,
                                   start:start+BLOCK_SIZE*RECORDING_FREQUENCY]
-    block_data = current_data[:, BLOCK_ELECTRODE_INDICES, :]
 
-    target_block_sba = np.average(extract_sba_average(
-        block_data, SBA_TARGET_FREQS), axis=0)
-    target_block_noise = np.average(extract_sba_average(
-        block_data, SBA_TARGET_FREQS+COMPARE_TARGET_TO)/2
-        + extract_sba_average(block_data, SBA_TARGET_FREQS - COMPARE_TARGET_TO)/2)
+    target_block_sba = extract_sba_average(current_data, SBA_TARGET_FREQS)
+    target_block_noise = extract_sba_average(current_data, SBA_TARGET_FREQS+COMPARE_TARGET_TO) / \
+        2 + extract_sba_average(current_data,
+                                SBA_TARGET_FREQS - COMPARE_TARGET_TO)/2
 
-    block_diffs.append(target_block_sba - target_block_noise)
+    target_vs_noise = target_block_sba - target_block_noise
+
+    # block_data = target_vs_noise[BLOCK_ELECTRODE_INDICES]
+    block_target.append(np.average(target_block_sba[BLOCK_ELECTRODE_INDICES]))
+    block_noise.append(np.average(target_block_noise[BLOCK_ELECTRODE_INDICES]))
+
+    # plot
+    ax.set_title(f"Block #{i}")
+    mne.viz.plot_topomap(target_vs_noise, raw.info, axes=ax, show=False)
 
 fig, ax = plt.subplots()
 fig.suptitle("SBA coherence at each block")
-ax.plot(np.arange(AMOUNT_OF_BLOCKS) *
-        (BLOCK_SIZE+2*TRIAL_MARGIN), np.array(block_diffs))
-
+ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) *
+        (BLOCK_SIZE+2*TRIAL_MARGIN), np.array(block_target) - np.array(block_noise), label="diff")
 plt.show(block=True)
