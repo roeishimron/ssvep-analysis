@@ -3,18 +3,20 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_noisy_circle_8hz_3ob_7blk"
+FILENAME = "roei_noisy_circle_10hz_3ob_5blk_15sec"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
-BASE_FREQ = 8
+BASE_FREQ = 10
 ODDBALL_MODULATION = 3
 TIME_MANIPULATED = False
+# TODO: Define terget as by weights
 TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
-AMOUNT_OF_BLOCKS = 7
-TRIAL_START, TRIAL_DURATION = 0, AMOUNT_OF_BLOCKS*15-1  # in s
+AMOUNT_OF_BLOCKS = 5
+BLOCK_LENGTH = 15
+TRIAL_START, TRIAL_DURATION = 10, AMOUNT_OF_BLOCKS*BLOCK_LENGTH-1  # in s
 BLOCK_ELECTRODES = ["Pz", "O1", "O2", "T5", "P3", "P4", "T6"]
 TRIALS_RANGE = (0, 3)
 
@@ -158,6 +160,26 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
     return psd / mean_noise
 
+# Shpuld be applied foreach electrode
+
+
+def local_zscore(psd_slice, skip):
+    center = int(psd_slice.shape[0]/2)
+    centerless = list(psd_slice[:center-skip]) + list(psd_slice[center+skip:])
+
+    return (psd_slice[center] - np.average(centerless)) / np.std(centerless)
+
+
+def one_d_zscore(psd, window_relative_size=1/100):
+    SKIP = 3
+    half_window_size = int(psd.shape[0]*window_relative_size/2)
+    jump = half_window_size + SKIP
+    z_scores = [0] * jump
+    for i in range(jump, psd.shape[0]-jump):
+        z_scores.append(local_zscore(psd[i-jump: i+jump], SKIP))
+
+    return np.array(z_scores + [0] * jump)
+
 
 NOISE_NEIGHBORS = 7
 NOISE_SKIP = 2
@@ -166,6 +188,7 @@ print(f'using {NOISE_NEIGHBORS} neighbors and skipping {NOISE_SKIP} bins')
 
 snrs = snr_spectrum(psds, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
                     noise_skip_neighbor_freqs=NOISE_SKIP)
+z_scores = np.apply_along_axis(one_d_zscore, -1, amplitudes)
 
 print("got snr")
 _, axes = plt.subplots(4, 1, sharex="all", sharey="none", figsize=(
@@ -199,17 +222,17 @@ target_channel_indices = np.argwhere(np.isin(np.array(channel_names),
                                              TARGET_ELECTRODES)).flatten()
 target_snrs = snrs[target_channel_indices]
 
-# SNR spectrum
-target_snr_mean = target_snrs.mean(axis=0)
-target_snr_std = target_snrs.std(axis=0)
+# z-score spectrum
+z_score_mean = z_scores.mean(axis=0)
+z_score_std = z_scores.std(axis=0)
 
-axes[2].plot(freqs, target_snr_mean, color="r")
+axes[2].plot(freqs, z_score_mean, color="r")
 axes[2].fill_between(
-    freqs, target_snr_mean - target_snr_std, target_snr_mean + target_snr_std, color="r", alpha=0.1
+    freqs, z_score_mean - z_score_std, z_score_mean + z_score_std, color="r", alpha=0.1
 )
 axes[2].set(
-    title="Target SNR spectrum",
-    ylabel="SNR",
+    title="z-score spectrum",
+    ylabel="z-score",
     xlim=[fmin, fmax],
 )
 
@@ -274,17 +297,20 @@ SBA_TARGET_FREQS = np.array([BASE_FREQ/ODDBALL_MODULATION * i for i in range(1, 
                              if i % ODDBALL_MODULATION != 0 and BASE_FREQ/ODDBALL_MODULATION * i != AC_FREQ])
 
 
-def extract_sba_average(data: np.typing.NDArray, target_freqs=SBA_TARGET_FREQS):
-    _, freqs, amps = into_spectrum(data)
-
+def z_scores_into_sba_average(z_scores, freqs, target_freqs=SBA_TARGET_FREQS):
     harmonic_indices = np.array(
         [np.argmin(np.abs(freqs - t)) for t in target_freqs])
-    return np.average(amps[:, harmonic_indices], 1)
+    return np.average(z_scores[:, harmonic_indices], 1)
+
+
+def extract_z_score_and_freqs(data: np.typing.NDArray):
+    _, freqs, amps = into_spectrum(data)
+    return np.apply_along_axis(one_d_zscore, -1, amps), freqs
 
 
 # print the SBA
-mne.viz.plot_topomap(extract_sba_average(
-    microvolt_data, SBA_TARGET_FREQS), raw.info, show=False)
+mne.viz.plot_topomap(z_scores_into_sba_average(*extract_z_score_and_freqs(
+    microvolt_data), SBA_TARGET_FREQS), raw.info, show=False)
 
 COMPARE_TARGET_TO = 0.5
 
@@ -292,37 +318,49 @@ fig, axs = plt.subplots(1, AMOUNT_OF_BLOCKS,  sharex="none",
                         sharey="none", label=f"{FILENAME}-target-vs-noise-sba-per-block")
 
 # calculate the coherence of stimuli to coherence of signal
-TRIAL_MARGIN = 1
-BLOCK_SIZE = int((TRIAL_DURATION+1)/AMOUNT_OF_BLOCKS - 2*TRIAL_MARGIN)
-
 BLOCK_ELECTRODE_INDICES = np.array([i for i in range(
     len(raw.info["chs"])) if raw.info["chs"][i]["ch_name"] in BLOCK_ELECTRODES])
 
 block_target = []
 block_noise = []
 
+CUT_FROM_START = 0
+CUT_FROM_END = 0
+
 for (i, ax) in enumerate(axs):
-    start = int(RECORDING_FREQUENCY*(i*(BLOCK_SIZE+2*TRIAL_MARGIN)+TRIAL_MARGIN))
+    start = int(RECORDING_FREQUENCY*(i*BLOCK_LENGTH+CUT_FROM_START))
     current_data = microvolt_data[:, :,
-                                  start:start+BLOCK_SIZE*RECORDING_FREQUENCY]
+                                  start:start+(BLOCK_LENGTH-CUT_FROM_END)*RECORDING_FREQUENCY]
+    z_score_and_freqs = extract_z_score_and_freqs(current_data)
 
-    target_block_sba = extract_sba_average(current_data, SBA_TARGET_FREQS)
-    target_block_noise = extract_sba_average(current_data, SBA_TARGET_FREQS+COMPARE_TARGET_TO) / \
-        2 + extract_sba_average(current_data,
-                                SBA_TARGET_FREQS - COMPARE_TARGET_TO)/2
+    target_block_sba = z_scores_into_sba_average(
+        *z_score_and_freqs, SBA_TARGET_FREQS)
+    target_block_noise = z_scores_into_sba_average(*z_score_and_freqs, SBA_TARGET_FREQS+COMPARE_TARGET_TO) / \
+        2 + z_scores_into_sba_average(*z_score_and_freqs,
+                                      SBA_TARGET_FREQS - COMPARE_TARGET_TO)/2
 
-    target_vs_noise = target_block_sba - target_block_noise
-
-    # block_data = target_vs_noise[BLOCK_ELECTRODE_INDICES]
-    block_target.append(np.average(target_block_sba[BLOCK_ELECTRODE_INDICES]))
-    block_noise.append(np.average(target_block_noise[BLOCK_ELECTRODE_INDICES]))
+    # TODO: max is OK here because we compare 2 maxima but overall it's not a good idea
+    block_target.append(np.max(target_block_sba[BLOCK_ELECTRODE_INDICES]))
+    # TODO: max is OK here because we compare 2 maxima but overall it's not a good idea
+    block_noise.append(np.max(target_block_noise[BLOCK_ELECTRODE_INDICES]))
 
     # plot
     ax.set_title(f"Block #{i}")
-    mne.viz.plot_topomap(target_vs_noise, raw.info, axes=ax, show=False)
+    mne.viz.plot_topomap(target_block_sba - target_block_noise,
+                         raw.info, axes=ax, show=False)
 
 fig, ax = plt.subplots()
 fig.suptitle("SBA coherence at each block")
-ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) *
-        (BLOCK_SIZE+2*TRIAL_MARGIN), np.array(block_target) - np.array(block_noise), label="diff")
+# ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) * (BLOCK_LENGTH),
+#         np.array(block_target) - np.array(block_noise), label="signal")
+ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) * (BLOCK_LENGTH),
+        np.array(block_target), label="signal")
+ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) * (BLOCK_LENGTH),
+        np.array(block_noise), label="noise")
+
+# TODO: Consider showing the noise-vs-signal difference
+# using z-scores or something that respacts the structure
+# that beign close to noise by E is MUCH "less indicative" than close by 2E etc.
+
+plt.legend()
 plt.show(block=True)
