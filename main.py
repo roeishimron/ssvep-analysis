@@ -84,13 +84,14 @@ def log_channel_time(c):
 def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray,
                                                     np.typing.NDArray,
                                                     np.typing.NDArray]:
-    data = np.average(data, axis=0)
-
     if TIME_MANIPULATED:
         data = np.apply_along_axis(log_channel_time, -1, arr=data)
 
+    # Averaging the amps instead of the signal due to offsets in the different recordings
+    amplitudes = np.average(np.abs(np.fft.rfft(data*np.hamming(data.shape[-1]),
+                                               axis=-1)), axis=0)
+
     freqs = np.fft.rfftfreq(data.shape[-1], d=1/RECORDING_FREQUENCY)
-    amplitudes = np.abs(np.fft.rfft(data))
     psd = amplitudes**2/freqs
 
     return (psd, freqs, amplitudes)
