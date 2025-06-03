@@ -52,7 +52,7 @@ epochs = mne.Epochs(
     picks='data',
     events=events,
     tmin=TRIAL_START,
-    tmax=TRIAL_DURATION,
+    tmax=TRIAL_DURATION + TRIAL_START,
     baseline=None,
     verbose=False,
 )
