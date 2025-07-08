@@ -3,26 +3,26 @@ import numpy as np
 import mne
 from typing import Tuple
 
-FILENAME = "roei_noisy_circle_10hz_3ob_5blk_15sec"
+FILENAME = "udi_ordered_digits_vs_hebrew_20hz_5ob_15s_constant"
 raw = mne.io.read_raw_edf(
     f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 
-BASE_FREQ = 10
-ODDBALL_MODULATION = 3
+BASE_FREQ = 20
+ODDBALL_MODULATION = 5
 TIME_MANIPULATED = False
-# TODO: Define terget as by weights
-TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "P3", "P4", "T6"])
+TARGET_ELECTRODES = np.array(["T5"])
 BAD_ELECTRODES = []
-SUM_HARMONICS_UNTIL = 1
-AMOUNT_OF_BLOCKS = 5
-BLOCK_LENGTH = 15
-TRIAL_START, TRIAL_DURATION = 10, AMOUNT_OF_BLOCKS*BLOCK_LENGTH-1  # in s
-BLOCK_ELECTRODES = ["Pz", "O1", "O2", "T5", "P3", "P4", "T6"]
-TRIALS_RANGE = (0, 3)
+SUM_HARMONICS_UNTIL = 3
+AMOUNT_OF_BLOCKS = 3
+BLOCK_LENGTH = 5
+TRIAL_START, TRIAL_DURATION = 3, AMOUNT_OF_BLOCKS*BLOCK_LENGTH  # in s
+BLOCK_ELECTRODES = ["T5"]
+TRIALS_RANGE = (0, 4)
 
 
+AC_FREQ = 50
 TOPO_WIDTH = 4
-TOPO_HEIGHT = 4
+TOPO_HEIGHT = 2
 RECORDING_FREQUENCY = 300
 print("read data")
 
@@ -220,11 +220,11 @@ axes[1].set(
 # draw the SNR of the target electrode (should be replaced with something cleverer, like RCA)
 target_channel_indices = np.argwhere(np.isin(np.array(channel_names),
                                              TARGET_ELECTRODES)).flatten()
-target_snrs = snrs[target_channel_indices]
+target_zscores = z_scores[target_channel_indices]
 
 # z-score spectrum
-z_score_mean = z_scores.mean(axis=0)
-z_score_std = z_scores.std(axis=0)
+z_score_mean = target_zscores.mean(axis=0)
+z_score_std = target_zscores.std(axis=0)
 
 axes[2].plot(freqs, z_score_mean, color="r")
 axes[2].fill_between(
@@ -258,49 +258,47 @@ axes[3].set(
 # find index of frequency bin closest to stimulation frequency
 
 
-HARMONEY_FREQS = np.array(range(TOPO_WIDTH * TOPO_HEIGHT))+1
+HARMONEY_FREQS = np.array(range(min(TOPO_WIDTH * TOPO_HEIGHT, int(AC_FREQ / BASE_FREQ * ODDBALL_MODULATION - 1) )))+1
 
 TARGET_FREQS = BASE_FREQ/ODDBALL_MODULATION*HARMONEY_FREQS
-RANGE_OF_TOPO_SEARCH = int(0.001 * RECORDING_FREQUENCY * BASE_FREQ)
 
 
-def into_chaverage(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
+def into_channel_average(target_freq: np.float64) -> Tuple[int, np.typing.NDArray]:
     target_center = int(np.argmin(np.abs(freqs - target_freq)))
 
     # get average SNR at target Hz for ALL channels
-    snrs_stim_hz = snrs[:, target_center]
+    snrs_stim_hz = z_scores[:, target_center]
     return (freqs[target_center], snrs_stim_hz)
 
 
-freqs_with_chaverages = list(map(into_chaverage, TARGET_FREQS))
+freqs_with_channel_averages = list(map(into_channel_average, TARGET_FREQS))
 
-upper_limit = np.max(np.array([t[1] for t in freqs_with_chaverages]).flatten())
+upper_limit = np.max(np.array([t[1] for t in freqs_with_channel_averages]).flatten())
 # plot SNR topography
 fig, axs = plt.subplots(TOPO_HEIGHT, TOPO_WIDTH,  sharex="none",
                         sharey="none", label=f"{FILENAME}-topomap")
 fig.suptitle(f"clearity up to {upper_limit:.0f}")
-for ((freq, chaverage), ax) in zip(freqs_with_chaverages, axs.flatten()):
+for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatten()):
 
     print(f"looking at freq {freq:.2f}")
     ax.set_title(f"SNR at F*{freq/BASE_FREQ*ODDBALL_MODULATION:.0f} ({
                  freq:.2f})")
 
-    mne.viz.plot_topomap(chaverage, raw.info,
+    mne.viz.plot_topomap(channel_average, raw.info,
                          vlim=(1, upper_limit), axes=ax, show=False)
 
     print(f"average SNR (target channels): {
-          chaverage[target_channel_indices].mean()}")
+          channel_average[target_channel_indices].mean()}")
 
-AC_FREQ = 50
 # for the grand_average
 SBA_TARGET_FREQS = np.array([BASE_FREQ/ODDBALL_MODULATION * i for i in range(1, SUM_HARMONICS_UNTIL+1)
                              if i % ODDBALL_MODULATION != 0 and BASE_FREQ/ODDBALL_MODULATION * i != AC_FREQ])
 
 
-def z_scores_into_sba_average(z_scores, freqs, target_freqs=SBA_TARGET_FREQS):
+def signal_into_sba_average(signal, freqs, target_freqs=SBA_TARGET_FREQS):
     harmonic_indices = np.array(
         [np.argmin(np.abs(freqs - t)) for t in target_freqs])
-    return np.average(z_scores[:, harmonic_indices], 1)
+    return np.average(signal[:, harmonic_indices], 1)
 
 
 def extract_z_score_and_freqs(data: np.typing.NDArray):
@@ -309,8 +307,7 @@ def extract_z_score_and_freqs(data: np.typing.NDArray):
 
 
 # print the SBA
-mne.viz.plot_topomap(z_scores_into_sba_average(*extract_z_score_and_freqs(
-    microvolt_data), SBA_TARGET_FREQS), raw.info, show=False)
+mne.viz.plot_topomap(signal_into_sba_average(z_scores, freqs, SBA_TARGET_FREQS), raw.info, show=False)
 
 COMPARE_TARGET_TO = 0.5
 
@@ -333,16 +330,14 @@ for (i, ax) in enumerate(axs):
                                   start:start+(BLOCK_LENGTH-CUT_FROM_END)*RECORDING_FREQUENCY]
     z_score_and_freqs = extract_z_score_and_freqs(current_data)
 
-    target_block_sba = z_scores_into_sba_average(
+    target_block_sba = signal_into_sba_average(
         *z_score_and_freqs, SBA_TARGET_FREQS)
-    target_block_noise = z_scores_into_sba_average(*z_score_and_freqs, SBA_TARGET_FREQS+COMPARE_TARGET_TO) / \
-        2 + z_scores_into_sba_average(*z_score_and_freqs,
+    target_block_noise = signal_into_sba_average(*z_score_and_freqs, SBA_TARGET_FREQS+COMPARE_TARGET_TO) / \
+        2 + signal_into_sba_average(*z_score_and_freqs,
                                       SBA_TARGET_FREQS - COMPARE_TARGET_TO)/2
 
-    # TODO: max is OK here because we compare 2 maxima but overall it's not a good idea
-    block_target.append(np.max(target_block_sba[BLOCK_ELECTRODE_INDICES]))
-    # TODO: max is OK here because we compare 2 maxima but overall it's not a good idea
-    block_noise.append(np.max(target_block_noise[BLOCK_ELECTRODE_INDICES]))
+    block_target.append(np.average(target_block_sba[BLOCK_ELECTRODE_INDICES]))
+    block_noise.append(np.average(target_block_noise[BLOCK_ELECTRODE_INDICES]))
 
     # plot
     ax.set_title(f"Block #{i}")
@@ -359,7 +354,7 @@ ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) * (BLOCK_LENGTH),
         np.array(block_noise), label="noise")
 
 # TODO: Consider showing the noise-vs-signal difference
-# using z-scores or something that respacts the structure
+# using z-scores or something that respects the structure
 # that beign close to noise by E is MUCH "less indicative" than close by 2E etc.
 
 plt.legend()
