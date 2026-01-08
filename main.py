@@ -1,17 +1,14 @@
-from itertools import chain
 import matplotlib.pyplot as plt
 import numpy as np
 import mne
 from typing import Tuple
 from scipy.signal.windows import kaiser
 
-FILENAME = "maya_hebrew_vs_mirror_10hz_2ob_60s"
-raw = mne.io.read_raw_edf(
-    f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
+FILENAME = "matan_barak_hebrew_vs_mirror_10hz_2ob_60s"
 
 BASE_FREQ = 10
 ODDBALL_MODULATION = 2
-TARGET_ELECTRODES = np.array(["T5", "T6", "O1", "O2", "P3", "P4", "Pz"])
+TARGET_ELECTRODES = np.array(["T5", "T6", "P3", "P4"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
 AMOUNT_OF_BLOCKS = 5
@@ -21,13 +18,14 @@ TRIAL_START, TRIAL_DURATION = 3 - TRIAL_MARGIN, AMOUNT_OF_BLOCKS*BLOCK_LENGTH # 
 BLOCK_ELECTRODES = ["T5", "T6"]
 TRIALS_RANGE = (0, 3)
 TIME_MANIPULATED = False
-ADDTIONAL_TARGET_FREQUENCIES = [7.5]
 AC_FREQ = 50
 TOPO_WIDTH = 4
 TOPO_HEIGHT = 2
 RECORDING_FREQUENCY = 300
 
 
+raw = mne.io.read_raw_edf(
+    f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
 print("read data")
 
 raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
@@ -45,7 +43,6 @@ raw.drop_channels(["Trigger"])
 # Set common average reference
 raw.set_eeg_reference()
 
-
 # Handle too close events:
 diffs = np.diff(events[:, 0], append=raw.last_samp)
 valids = np.argwhere(diffs > 1000).flatten()
@@ -60,41 +57,15 @@ epochs = mne.Epochs(
     tmin=TRIAL_START,
     tmax=TRIAL_DURATION + TRIAL_START,
     baseline=None,
-    verbose=True,
 )
 
-# time-shifting parameters
-SCALE = 20
-A = 9
-
-# take f(x) into f(r(x))
 
 V1_ELECTRODE_INDICES = np.array([i for i in range(
     len(raw.info["chs"])) if raw.info["chs"][i]["ch_name"] in set(["O1", "O2"])])
 
-
-def exp_channel_time(c):
-    f_source = np.linspace(0, TRIAL_DURATION, c.shape[-1])
-    r_x = A*np.exp(f_source/SCALE) - A
-
-    return np.exp(np.interp(r_x, f_source, np.log(c+1)))-1
-
-# takes f(x) into f(t(x))
-
-
-def log_channel_time(c):
-    ERROR = 0.1
-    f_source = np.linspace(0, TRIAL_DURATION, c.shape[-1]) + ERROR
-    t_x = SCALE*np.log(f_source/A+1)
-    return np.log(np.interp(t_x, f_source, np.exp(c)))
-
-
 def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray,
                                                              np.typing.NDArray,
                                                              np.typing.NDArray]:
-    if TIME_MANIPULATED:
-        data = np.apply_along_axis(log_channel_time, -1, arr=data)
-
     WINDOW_SIZE = int(RECORDING_FREQUENCY) * 4
     segments = np.lib.stride_tricks.sliding_window_view(data,
                                                         WINDOW_SIZE, -1)[:, :, ::WINDOW_SIZE]
@@ -250,74 +221,12 @@ for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatte
     print(f"average SNR (target channels): {
           channel_average[target_channel_indices].mean()}")
 
-# for the grand_average
-SBA_TARGET_FREQS = np.array([BASE_FREQ/ODDBALL_MODULATION * i for i in range(1, SUM_HARMONICS_UNTIL+1)
-                             if i % ODDBALL_MODULATION != 0 and BASE_FREQ/ODDBALL_MODULATION * i != AC_FREQ])
-
-
-def signal_into_sba_average(signal, freqs, target_freqs=SBA_TARGET_FREQS):
-    harmonic_indices = np.array(
-        [np.argmin(np.abs(freqs - t)) for t in target_freqs])
-    return np.average(signal[:, harmonic_indices], 1)
-
-
-def extract_snrs_and_freqs(data: np.typing.NDArray):
-    freqs, amps, _ = into_spectrum(data)
-    snrs = snr_spectrum(amps, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
-                        noise_skip_neighbor_freqs=NOISE_SKIP)
-
-    return snrs, freqs
-
-
-# print the SBA
-mne.viz.plot_topomap(signal_into_sba_average(
-    snrs, freqs, SBA_TARGET_FREQS), raw.info, show=False)
-
-COMPARE_TARGET_TO = 0.5
-
-fig, axs = plt.subplots(1, AMOUNT_OF_BLOCKS,  sharex="none",
-                        sharey="none", label=f"{FILENAME}-target-vs-noise-sba-per-block")
-
-# calculate the coherence of stimuli to coherence of signal
-BLOCK_ELECTRODE_INDICES = np.array([i for i in range(
-    len(raw.info["chs"])) if raw.info["chs"][i]["ch_name"] in BLOCK_ELECTRODES])
-
-block_target = []
-
-CUT_FROM_START = 0
-CUT_FROM_END = 0
-
-for (i, ax) in enumerate(axs):
-    start = int(RECORDING_FREQUENCY*(i*BLOCK_LENGTH+CUT_FROM_START))
-    current_data = microvolt_data[:, :,
-                                  start:start+(BLOCK_LENGTH-CUT_FROM_END)*RECORDING_FREQUENCY]
-    z_score_and_freqs = extract_snrs_and_freqs(current_data)
-
-    target_block_sba = signal_into_sba_average(
-        *z_score_and_freqs, SBA_TARGET_FREQS)
-
-    block_target.append(np.average(target_block_sba[BLOCK_ELECTRODE_INDICES]))
-
-    # plot
-    ax.set_title(f"Block #{i}")
-    mne.viz.plot_topomap(target_block_sba,
-                         raw.info, axes=ax, show=False)
-
-fig, ax = plt.subplots()
-fig.suptitle("SBA coherence at each block")
-# ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) * (BLOCK_LENGTH),
-#         np.array(block_target) - np.array(block_noise), label="signal")
-ax.plot((np.arange(AMOUNT_OF_BLOCKS)+1) * (BLOCK_LENGTH),
-        np.array(block_target), label="signal")
-
-plt.legend()
-
-
 # phase analysis:
-
-SIGNAL_PHASE_ELECTRODE = np.argmax(
-    snrs[:, freqs == BASE_FREQ//ODDBALL_MODULATION])
+target_snrs = snrs[target_channel_indices]
+SIGNAL_PHASE_ELECTRODE = target_channel_indices[np.argmax(
+    target_snrs[:, freqs == BASE_FREQ//ODDBALL_MODULATION])]
 BASE_PHASE_ELECTRODE = V1_ELECTRODE_INDICES[np.argmax(snrs[V1_ELECTRODE_INDICES, freqs == BASE_FREQ])]
+print(f"signal phase; electrode: {SIGNAL_PHASE_ELECTRODE}, base: {BASE_PHASE_ELECTRODE}")
 
 signal_components =  np.squeeze(fourier_components[..., freqs == BASE_FREQ/ODDBALL_MODULATION][:, SIGNAL_PHASE_ELECTRODE])
 base_components =  np.squeeze(fourier_components[..., freqs == BASE_FREQ][:, BASE_PHASE_ELECTRODE])
