@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import mne
-from typing import Tuple
+from typing import Any, List, Tuple
 from scipy.signal.windows import kaiser
 
 SUBJECT_NAME = "noa_nissim"
@@ -26,45 +26,46 @@ TOPO_WIDTH = 4
 TOPO_HEIGHT = 2
 RECORDING_FREQUENCY = 300
 
+def parse_file(path: str) -> Tuple[np.ndarray, Any]:
 
-raw = mne.io.read_raw_edf(
-    f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
-print("read data")
+    raw = mne.io.read_raw_edf(
+        f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
+    print("read data")
 
-raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
+    raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
 
-raw.drop_channels(['Ax', 'Ay', 'Az'])
-raw.drop_channels(['Event', 'CM'])
-raw.drop_channels([c for c in raw.ch_names if ":" in c])
-raw.drop_channels(BAD_ELECTRODES)
-raw.set_montage(montage='standard_1020')
+    raw.drop_channels(['Ax', 'Ay', 'Az'])
+    raw.drop_channels(['Event', 'CM'])
+    raw.drop_channels([c for c in raw.ch_names if ":" in c])
+    raw.drop_channels(BAD_ELECTRODES)
+    raw.set_montage(montage='standard_1020')
 
-# detect events and edit
-events = mne.find_events(raw, stim_channel="Trigger", mask=8)
-raw.drop_channels(["Trigger"])
+    # detect events and edit
+    events = mne.find_events(raw, stim_channel="Trigger", mask=8)
+    raw.drop_channels(["Trigger"])
 
-# Set common average reference
-raw.set_eeg_reference()
+    # Set common average reference
+    raw.set_eeg_reference()
 
-# Handle too close events:
-diffs = np.diff(events[:, 0], append=raw.last_samp)
-valids = np.argwhere(diffs > 1000).flatten()
-events = events[valids][TRIALS_RANGE[0]:TRIALS_RANGE[1]]
-print(f"found {len(events)} events")
+    # Handle too close events:
+    diffs = np.diff(events[:, 0], append=raw.last_samp)
+    valids = np.argwhere(diffs > 1000).flatten()
+    events = events[valids][TRIALS_RANGE[0]:TRIALS_RANGE[1]]
+    print(f"found {len(events)} events")
 
-# Construct epochs
-epochs = mne.Epochs(
-    raw,
-    picks='data',
-    events=events,
-    tmin=TRIAL_START,
-    tmax=TRIAL_DURATION + TRIAL_START,
-    baseline=None,
-)
+    # Construct epochs
+    epochs = mne.Epochs(
+        raw,
+        picks='data',
+        events=events,
+        tmin=TRIAL_START,
+        tmax=TRIAL_DURATION + TRIAL_START,
+        baseline=None,
+    )
+    print(f"{epochs.drop_log}")
 
+    return epochs.get_data(units="mV"), raw.info
 
-V1_ELECTRODE_INDICES = np.array([i for i in range(
-    len(raw.info["chs"])) if raw.info["chs"][i]["ch_name"] in set(["O1", "O2"])])
 
 def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray,
                                                              np.typing.NDArray,
@@ -90,11 +91,13 @@ def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray,
 fmin = 0.5
 fmax = BASE_FREQ + 5
 
-channel_names = raw.ch_names
-microvolt_data = epochs.get_data(units="mV")
-print(f"{epochs.drop_log}")
-
+microvolt_data, raw_info = parse_file(FILENAME)
+channels = raw_info["chs"]
+channel_names = [c["ch_name"] for c in channels]
 microvolt_data = microvolt_data[..., :-1]
+
+V1_ELECTRODE_INDICES = np.array([i for i in range(
+    len(channels)) if channels[i]["ch_name"] in set(["O1", "O2"])])
 
 freqs, amplitudes, fourier_components = into_spectrum(microvolt_data)
 print("got psds")
@@ -218,7 +221,7 @@ for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatte
     ax.set_title(f"SNR at F*{freq/BASE_FREQ*ODDBALL_MODULATION:.0f} ({
                  freq:.2f})")
 
-    mne.viz.plot_topomap(channel_average, raw.info,
+    mne.viz.plot_topomap(channel_average, raw_info,
                          vlim=(1, upper_limit), axes=ax, show=False)
 
     print(f"average SNR (target channels): {
