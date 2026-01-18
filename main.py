@@ -4,10 +4,11 @@ import mne
 from typing import Tuple
 from scipy.signal.windows import kaiser
 
-FILENAME = "matan_barak_hebrew_vs_mirror_10hz_2ob_60s"
-
+SUBJECT_NAME = "noa_nissim"
+EXPERIMENT_NAME = "hebrew_vs_mirror"
 BASE_FREQ = 10
 ODDBALL_MODULATION = 2
+
 TARGET_ELECTRODES = np.array(["T5", "T6", "P3", "P4"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
@@ -15,6 +16,8 @@ AMOUNT_OF_BLOCKS = 5
 BLOCK_LENGTH = 12
 TRIAL_MARGIN = 0.5 # remove this amount of seconds from beggining to end of trial
 TRIAL_START, TRIAL_DURATION = 3 - TRIAL_MARGIN, AMOUNT_OF_BLOCKS*BLOCK_LENGTH # in s
+
+FILENAME = f"{SUBJECT_NAME}_{EXPERIMENT_NAME}_{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s"
 BLOCK_ELECTRODES = ["T5", "T6"]
 TRIALS_RANGE = (0, 3)
 TIME_MANIPULATED = False
@@ -66,7 +69,7 @@ V1_ELECTRODE_INDICES = np.array([i for i in range(
 def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray,
                                                              np.typing.NDArray,
                                                              np.typing.NDArray]:
-    WINDOW_SIZE = int(RECORDING_FREQUENCY) * 4
+    WINDOW_SIZE = int(RECORDING_FREQUENCY) * 2
     segments = np.lib.stride_tricks.sliding_window_view(data,
                                                         WINDOW_SIZE, -1)[:, :, ::WINDOW_SIZE]
     segments = segments - np.mean(segments, axis=-1, keepdims=True)
@@ -128,8 +131,8 @@ def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
     return psd / mean_noise
 
 
-NOISE_NEIGHBORS = 7
-NOISE_SKIP = 2
+NOISE_NEIGHBORS = 3
+NOISE_SKIP = 1
 
 print(f'using {NOISE_NEIGHBORS} neighbors and skipping {NOISE_SKIP} bins')
 
