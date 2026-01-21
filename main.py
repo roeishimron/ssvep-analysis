@@ -1,3 +1,5 @@
+import os
+from os.path import isfile, join
 import matplotlib.pyplot as plt
 import numpy as np
 import mne
@@ -5,6 +7,7 @@ from typing import Any, List, Tuple
 from scipy.signal.windows import kaiser
 
 SUBJECT_NAME = "noa_nissim"
+
 EXPERIMENT_NAME = "hebrew_vs_mirror"
 BASE_FREQ = 10
 ODDBALL_MODULATION = 2
@@ -14,10 +17,10 @@ BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
 AMOUNT_OF_BLOCKS = 5
 BLOCK_LENGTH = 12
-TRIAL_MARGIN = 0.5 # remove this amount of seconds from beggining to end of trial
-TRIAL_START, TRIAL_DURATION = 3 - TRIAL_MARGIN, AMOUNT_OF_BLOCKS*BLOCK_LENGTH # in s
+TRIAL_MARGIN = 0.5  # remove this amount of seconds from beggining to end of trial
+TRIAL_START, TRIAL_DURATION = 3 - \
+    TRIAL_MARGIN, AMOUNT_OF_BLOCKS*BLOCK_LENGTH  # in s
 
-FILENAME = f"{SUBJECT_NAME}_{EXPERIMENT_NAME}_{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s"
 BLOCK_ELECTRODES = ["T5", "T6"]
 TRIALS_RANGE = (0, 3)
 TIME_MANIPULATED = False
@@ -25,14 +28,19 @@ AC_FREQ = 50
 TOPO_WIDTH = 4
 TOPO_HEIGHT = 2
 RECORDING_FREQUENCY = 300
+BASE_PATH = "/media/lab-server/roei.shimron/ssvep/experiments"
 
-def parse_file(path: str) -> Tuple[np.ndarray, Any]:
 
-    raw = mne.io.read_raw_edf(
-        f"/media/lab-server/roei.shimron/ssvep/experiments/{FILENAME}_raw.edf", preload=True, verbose=False)
-    print("read data")
+def subject_name_into_filename(subject_name: str):
+    return f"{BASE_PATH}/{subject_name}_{EXPERIMENT_NAME}_{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s_raw.edf"
 
-    raw.rename_channels(lambda s: s.replace("EEG ", "").replace("-Pz", ""), False)
+
+def parse_file(filename: str) -> Tuple[np.ndarray, Any]:
+
+    raw = mne.io.read_raw_edf(filename, preload=True, verbose=False)
+
+    raw.rename_channels(lambda s: s.replace(
+        "EEG ", "").replace("-Pz", ""), False)
 
     raw.drop_channels(['Ax', 'Ay', 'Az'])
     raw.drop_channels(['Event', 'CM'])
@@ -68,30 +76,42 @@ def parse_file(path: str) -> Tuple[np.ndarray, Any]:
 
 
 def into_spectrum(data: np.typing.NDArray) -> Tuple[np.typing.NDArray,
-                                                             np.typing.NDArray,
-                                                             np.typing.NDArray]:
+                                                    np.typing.NDArray,
+                                                    np.typing.NDArray]:
     WINDOW_SIZE = int(RECORDING_FREQUENCY) * 2
     segments = np.lib.stride_tricks.sliding_window_view(data,
                                                         WINDOW_SIZE, -1)[:, :, ::WINDOW_SIZE]
     segments = segments - np.mean(segments, axis=-1, keepdims=True)
 
-
     fourier_components = np.fft.rfft(segments*kaiser(segments.shape[-1], 4),
-                                               axis=-1)
+                                     axis=-1)
     freqs = np.fft.rfftfreq(segments.shape[-1], d=1/RECORDING_FREQUENCY)
-    
+
     average_component = np.average(fourier_components, -2)
     amplitudes = np.average(np.abs(average_component), axis=0)**2
 
-
     return (freqs, amplitudes, fourier_components)
+
+def parse_folder(foldername: str):
+    paths = [p for p in [join(foldername, f) for f in os.listdir(foldername)] if isfile(p)]
+    datas_with_info = [parse_file(p) for p in paths]
+
+    for file, (data, _) in zip(paths, datas_with_info):
+        if data.shape != datas_with_info[0][0].shape:
+            print(f"Bad data shape for {file} (shape is {data.shape})")
+            exit()
+    
+    all_subjects = np.array([d[0] for d in datas_with_info])
+    # tempurarly, unify the subjects as if there are simply more repetitions
+    return np.reshape(all_subjects, (all_subjects.shape[0]*all_subjects.shape[1],
+                                      all_subjects.shape[2], all_subjects.shape[3])), datas_with_info[0][1]
 
 
 # Calculate PSD
 fmin = 0.5
 fmax = BASE_FREQ + 5
 
-microvolt_data, raw_info = parse_file(FILENAME)
+microvolt_data, raw_info = parse_folder(f"{BASE_PATH}/hebrew_vs_mirror_15hz") # parse_file(subject_name_into_filename(SUBJECT_NAME))
 channels = raw_info["chs"]
 channel_names = [c["ch_name"] for c in channels]
 microvolt_data = microvolt_data[..., :-1]
@@ -103,7 +123,7 @@ freqs, amplitudes, fourier_components = into_spectrum(microvolt_data)
 print("got psds")
 
 
-def snr_spectrum(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
+def into_SNR(psd, noise_n_neighbor_freqs=1, noise_skip_neighbor_freqs=1):
 
     # Construct a kernel that calculates the mean of the neighboring
     # frequencies
@@ -139,16 +159,16 @@ NOISE_SKIP = 1
 
 print(f'using {NOISE_NEIGHBORS} neighbors and skipping {NOISE_SKIP} bins')
 
-snrs = snr_spectrum(amplitudes, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
-                    noise_skip_neighbor_freqs=NOISE_SKIP)
+snrs = into_SNR(amplitudes, noise_n_neighbor_freqs=NOISE_NEIGHBORS,
+                noise_skip_neighbor_freqs=NOISE_SKIP)
 
 print("got snr")
 _, axes = plt.subplots(3, 1, sharex="all", sharey="none", figsize=(
-    8, 5), label=f"{FILENAME}-spectrum")
+    8, 5), label=f"{SUBJECT_NAME}-spectrum")
 
 # SNR spectrum
 snr_mean = snrs.mean(axis=0)
-snr_std = snrs.std(axis=0)
+snr_std = snrs.std(axis=0) # This wrongly assumes independence
 
 axes[0].plot(freqs, snr_mean)
 # axes[0].fill_between(
@@ -213,7 +233,7 @@ upper_limit = np.max(
     np.array([t[1] for t in freqs_with_channel_averages]).flatten())
 # plot SNR topography
 fig, axs = plt.subplots(TOPO_HEIGHT, TOPO_WIDTH,  sharex="none",
-                        sharey="none", label=f"{FILENAME}-topomap")
+                        sharey="none", label=f"{SUBJECT_NAME}-topomap")
 fig.suptitle(f"clearity up to {upper_limit:.0f}")
 for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatten()):
 
@@ -231,14 +251,19 @@ for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatte
 target_snrs = snrs[target_channel_indices]
 SIGNAL_PHASE_ELECTRODE = target_channel_indices[np.argmax(
     target_snrs[:, freqs == BASE_FREQ//ODDBALL_MODULATION])]
-BASE_PHASE_ELECTRODE = V1_ELECTRODE_INDICES[np.argmax(snrs[V1_ELECTRODE_INDICES, freqs == BASE_FREQ])]
-print(f"signal phase; electrode: {SIGNAL_PHASE_ELECTRODE}, base: {BASE_PHASE_ELECTRODE}")
+BASE_PHASE_ELECTRODE = V1_ELECTRODE_INDICES[np.argmax(
+    snrs[V1_ELECTRODE_INDICES, freqs == BASE_FREQ])]
+print(
+    f"signal phase; electrode: {SIGNAL_PHASE_ELECTRODE}, base: {BASE_PHASE_ELECTRODE}")
 
-signal_components =  np.squeeze(fourier_components[..., freqs == BASE_FREQ/ODDBALL_MODULATION][:, SIGNAL_PHASE_ELECTRODE])
-base_components =  np.squeeze(fourier_components[..., freqs == BASE_FREQ][:, BASE_PHASE_ELECTRODE])
+signal_components = np.squeeze(
+    fourier_components[..., freqs == BASE_FREQ/ODDBALL_MODULATION][:, SIGNAL_PHASE_ELECTRODE])
+base_components = np.squeeze(
+    fourier_components[..., freqs == BASE_FREQ][:, BASE_PHASE_ELECTRODE])
 
 # Rotate the signal `ODDBALL_MODULATION`-fold so it'll be on the same rotation as the faster base. Then substract for difference.
-base_timescale = signal_components.mean(-1)**ODDBALL_MODULATION / base_components.mean(-1)
+base_timescale = signal_components.mean(
+    -1)**ODDBALL_MODULATION / base_components.mean(-1)
 
 base_time_diff = (np.angle(base_timescale) + np.pi)/2/np.pi/BASE_FREQ*1000
 print(f"differences in ms are {base_time_diff}")
