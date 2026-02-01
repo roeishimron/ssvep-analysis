@@ -5,10 +5,11 @@ import numpy as np
 import mne
 from typing import Any, List, Tuple
 from scipy.signal.windows import kaiser
+from scipy.stats import linregress
 
-SUBJECT_NAME = "noa_nissim"
+SUBJECT_NAME = "roei"
 
-EXPERIMENT_NAME = "hebrew_vs_mirror"
+EXPERIMENT_NAME = "english_vs_mirror"
 BASE_FREQ = 10
 ODDBALL_MODULATION = 2
 
@@ -32,7 +33,7 @@ BASE_PATH = "/media/lab-server/roei.shimron/ssvep/experiments"
 
 
 def subject_name_into_filename(subject_name: str):
-    return f"{BASE_PATH}/{subject_name}_{EXPERIMENT_NAME}_{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s_raw.edf"
+    return f"""{BASE_PATH}/{EXPERIMENT_NAME}_{BASE_FREQ}hz/{subject_name}_{EXPERIMENT_NAME}_{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s_raw.edf"""
 
 
 def parse_file(filename: str) -> Tuple[np.ndarray, Any]:
@@ -111,7 +112,8 @@ def parse_folder(foldername: str):
 fmin = 0.5
 fmax = BASE_FREQ + 5
 
-microvolt_data, raw_info = parse_folder(f"{BASE_PATH}/hebrew_vs_mirror_15hz") # parse_file(subject_name_into_filename(SUBJECT_NAME))
+#TODO: Name the folder in a "subject-like" manner allowing configuration from the constants
+microvolt_data, raw_info =  parse_file(subject_name_into_filename(SUBJECT_NAME)) #parse_folder(f"{BASE_PATH}/hebrew_vs_mirror_20hz")#
 channels = raw_info["chs"]
 channel_names = [c["ch_name"] for c in channels]
 microvolt_data = microvolt_data[..., :-1]
@@ -255,11 +257,36 @@ BASE_PHASE_ELECTRODE = V1_ELECTRODE_INDICES[np.argmax(
     snrs[V1_ELECTRODE_INDICES, freqs == BASE_FREQ])]
 print(
     f"signal phase; electrode: {SIGNAL_PHASE_ELECTRODE}, base: {BASE_PHASE_ELECTRODE}")
-
+TARGET_FREQ = BASE_FREQ/ODDBALL_MODULATION
 signal_components = np.squeeze(
-    fourier_components[..., freqs == BASE_FREQ/ODDBALL_MODULATION][:, SIGNAL_PHASE_ELECTRODE])
+    fourier_components[..., freqs == TARGET_FREQ][:, SIGNAL_PHASE_ELECTRODE])
+
+noise_mask = ((freqs > TARGET_FREQ + 0.5) & (freqs < TARGET_FREQ + 2)) | ((freqs < TARGET_FREQ - 0.5) & (freqs > TARGET_FREQ - 2))
+noise_components = np.squeeze(
+    fourier_components[..., noise_mask][:, SIGNAL_PHASE_ELECTRODE].mean(2))
+assert(noise_components.shape == signal_components.shape)
+
 base_components = np.squeeze(
     fourier_components[..., freqs == BASE_FREQ][:, BASE_PHASE_ELECTRODE])
+
+
+fig, ax = plt.subplots(subplot_kw={'projection': 'polar'},layout='constrained')
+ax.grid(True)
+for signal_component in signal_components:
+    ax.plot(np.angle(signal_component), np.abs(signal_component),  "o")
+
+_, ax = plt.subplots(2)
+for signal_component, noise_component in zip(signal_components, noise_components):
+    smoothed_signal = np.abs(np.convolve(signal_component, np.ones(5)/5, mode="valid"))
+    smoothed_noise = np.abs(np.convolve(noise_component, np.ones(5)/5, mode="valid"))
+
+    ax[0].plot(smoothed_signal)
+    ax[0].plot(smoothed_noise, color="r")
+    windows = np.lib.stride_tricks.sliding_window_view(signal_component, 5)
+    slopes = [slope for slope, intercept, r, p, se in 
+              [linregress(np.arange(len(win)), np.abs(win)) for win in windows]]
+    ax[1].plot(slopes)
+
 
 # Rotate the signal `ODDBALL_MODULATION`-fold so it'll be on the same rotation as the faster base. Then substract for difference.
 base_timescale = signal_components.mean(
