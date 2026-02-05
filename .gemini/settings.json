@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "debugmcp": {
+      "url": "http://localhost:3001/sse",
+      "description": "DebugMCP - AI-powered debugging assistant"
+    }
+  },
+  "general": {
+    "previewFeatures": true,
+    "disableAutoUpdate": true,
+    "enableAutoUpdate": false
+  }
+}

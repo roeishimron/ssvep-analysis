@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/vscode/devcontainers/python:3
+FROM mcr.microsoft.com/vscode/devcontainers/python:3.14-trixie
 
 RUN echo "alias ll='ls -alF'"  >> ~/.bashrc
 
