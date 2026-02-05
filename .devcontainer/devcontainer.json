@@ -39,7 +39,9 @@
 		"vscode": {
 			"extensions": [
 				"ms-python.python",
-				"ms-python.autopep8"
+				"ms-python.autopep8",
+				"Google.gemini-cli-vscode-ide-companion",
+				"ozzafar.debugmcpextension"
 			]
 		}
 	}, // Allowing graphics

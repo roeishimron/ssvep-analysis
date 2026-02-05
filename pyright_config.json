@@ -1,0 +1,18 @@
+{
+  "include": [
+    "*.py",
+  ],
+
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "src/experimental",
+    "src/typestubs"
+  ],
+
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": false,
+
+  "pythonVersion": "3.14",
+  "pythonPlatform": "Linux"
+}

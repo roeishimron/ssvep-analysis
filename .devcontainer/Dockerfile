@@ -7,3 +7,11 @@ RUN apt-get update && apt-get install -y \
     libxcb-randr0-dev libxcb-xtest0-dev libxcb-xinerama0-dev libxcb-shape0-dev libxcb-xkb-dev\
     'libxcb*[!-dev]'\
     qtwayland5
+
+# gemini support:
+
+RUN apt-get update && apt-get install -y npm
+RUN npm install -g @google/gemini-cli
+
+USER vscode
+RUN gemini extensions install --consent https://github.com/gemini-cli-extensions/conductor
