@@ -11,17 +11,23 @@ class StudyLoader:
         self.recording_frequency = recording_frequency
         self.window_size = int(recording_frequency * window_duration_s)
 
-    def _parse_folder_name(self, folder_name: str) -> ConditionProperties:
+    def _parse_folder_name(self, folder_name: str) -> Tuple[ConditionProperties, float]:
         # Expected pattern: 10hz_2ob_60s
-        match = re.match(r"(\d+)hz_(\d+)ob", folder_name)
+        match = re.match(r"(\d+)hz_(\d+)ob_(\d+)s", folder_name)
         if not match:
-            raise ValueError(f"Folder name {folder_name} does not match expected pattern <freq>hz_<ob>ob")
+            # Try without duration as fallback
+            match = re.match(r"(\d+)hz_(\d+)ob", folder_name)
+            if not match:
+                raise ValueError(f"Folder name {folder_name} does not match expected pattern <freq>hz_<ob>ob[_<dur>s]")
+            duration = 60.0 # Default
+        else:
+            duration = float(match.group(3))
         
         carrier_freq = float(match.group(1))
         modulation = float(match.group(2))
         target_freq = carrier_freq / modulation
         
-        return ConditionProperties(target_frequency=np.float64(target_freq), carrier_frequency=np.float64(carrier_freq))
+        return ConditionProperties(target_frequency=np.float64(target_freq), carrier_frequency=np.float64(carrier_freq)), duration
 
     def _process_data(self, data: np.ndarray) -> SubjectData:
         # data shape: (Trial, Electrode, Time)
@@ -41,7 +47,7 @@ class StudyLoader:
         
         return fourier_components.astype(np.complex64)
 
-    def _load_edf(self, file_path: str) -> Tuple[np.ndarray, mne.Info]:
+    def _load_edf(self, file_path: str, duration: float) -> Tuple[np.ndarray, mne.Info]:
         raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
         
         raw.rename_channels(lambda s: s.replace(
@@ -70,7 +76,7 @@ class StudyLoader:
             picks='data',
             events=events,
             tmin=2.5, # Constant for 3 seconds delay minus 0.5 sec
-            tmax=60, # TODO: Derive from file
+            tmax=duration,
             baseline=None,
         )
 
@@ -86,7 +92,7 @@ class StudyLoader:
                 continue
                 
             try:
-                props = self._parse_folder_name(folder_name)
+                props, duration = self._parse_folder_name(folder_name)
             except ValueError:
                 continue # Skip folders that don't match pattern
 
@@ -98,7 +104,7 @@ class StudyLoader:
                 subject_name = os.path.splitext(file_name)[0].split("_raw")[0]
                 
                 try:
-                    data, info = self._load_edf(file_path)
+                    data, info = self._load_edf(file_path, duration)
                     processed_data = self._process_data(data)
                     yield subject_name, props, info, processed_data
                 except Exception as e:

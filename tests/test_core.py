@@ -4,6 +4,16 @@ import mne
 import sys
 from core import Study, ConditionProperties, ConditionBlob, Subject, ConditionView
 
+class TestConditionProperties(unittest.TestCase):
+    def test_immutability(self):
+        props = ConditionProperties(np.float64(10.0), np.float64(20.0))
+        with self.assertRaises(AttributeError):
+            props.target_frequency = 15.0
+
+    def test_missing_fields(self):
+        with self.assertRaises(TypeError):
+            ConditionProperties(target_frequency=10.0)
+
 class TestConditionBlob(unittest.TestCase):
     def setUp(self):
         # (S, T, E, W, F)
@@ -19,6 +29,15 @@ class TestConditionBlob(unittest.TestCase):
         self.assertEqual(blob.n_electrodes, 3)
         self.assertEqual(blob.n_windows, 5)
         self.assertEqual(blob.n_frequencies, 50)
+        self.assertEqual(blob.data.dtype, np.complex64)
+
+    def test_should_fail_non_5d(self):
+        with self.assertRaises(ValueError):
+            ConditionBlob(np.random.rand(2, 3, 3, 5), self.props, self.info, self.subjects)
+
+    def test_should_fail_mismatched_subjects(self):
+        with self.assertRaises(ValueError):
+            ConditionBlob(self.data, self.props, self.info, self.subjects[:1])
 
 class TestStudy(unittest.TestCase):
     def setUp(self):
@@ -84,6 +103,30 @@ class TestStudy(unittest.TestCase):
         # Should be (E, F) -> (2, 10)
         # Averaged over S and T.
         self.assertEqual(snr.shape, (2, 10))
+
+    def test_partial_participation(self):
+        stream = [
+            ("S1", self.props1, self.info, np.random.rand(3, 3, 5, 50).astype(np.complex64)),
+            ("S2", self.props2, self.info, np.random.rand(3, 3, 5, 50).astype(np.complex64)),
+        ]
+        study = Study(iter(stream), min_trials=3)
+        s1 = next(s for s in study.subjects() if s.name == "S1")
+        s2 = next(s for s in study.subjects() if s.name == "S2")
+        
+        self.assertIn(self.props1, s1._views)
+        self.assertNotIn(self.props2, s1._views)
+        self.assertIn(self.props2, s2._views)
+        self.assertNotIn(self.props1, s2._views)
+
+    def test_empty_stream(self):
+        study = Study(iter([]))
+        self.assertEqual(len(list(study.subjects())), 0)
+        self.assertEqual(len(study._blobs), 0)
+
+    def test_non_existent_condition(self):
+        study = Study(iter([]))
+        with self.assertRaises(KeyError):
+            study.get_condition(self.props1)
 
 if __name__ == '__main__':
     unittest.main()
