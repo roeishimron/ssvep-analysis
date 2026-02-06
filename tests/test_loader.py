@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import os
 from loader import StudyLoader
-from core import ConditionProperties
+from core_types import ConditionProperties
 
 class TestStudyLoader(unittest.TestCase):
     def setUp(self):

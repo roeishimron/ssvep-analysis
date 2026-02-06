@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 import mne
 import sys
-from core import Study, ConditionProperties, ConditionBlob, Subject, ConditionView
+from core import Study, ConditionBlob, Subject, ConditionView
+from core_types import ConditionProperties
 
 class TestConditionProperties(unittest.TestCase):
     def test_immutability(self):

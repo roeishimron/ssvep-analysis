@@ -2,9 +2,10 @@ import sys
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-from core import Study, ConditionProperties
+from core import Study
+from core_types import ConditionProperties
 from loader import StudyLoader
-from analyze_spectrum import analyze_spectrum, plot_snrs
+from analyze_spectrum import analyze_spectrum, plot_snrs, plot_snr_comparison
 
 def main():
     if len(sys.argv) < 2:
@@ -35,7 +36,7 @@ def main():
     # 3. For each condition, plot aggregate analysis
     # We'll use a specific electrode subset if available, otherwise all
     # Standard SSVEP electrodes of interest for this project:
-    TARGET_ELECTRODES = ["T5", "T6", "P3", "P4"]
+    TARGET_ELECTRODES = ["T5"]
 
     for props in conditions:
         print(f"\nAnalyzing condition: {props}")
@@ -59,6 +60,10 @@ def main():
         # Plot 2: Topography (Spatial distribution of SNR at harmonics)
         # Topomap needs all electrodes
         plot_snrs(view, view.blob.raw_info)
+
+    # 4. Global Analysis: SNR Comparison across conditions
+    print("\nPlotting SNR comparison across conditions for T5...")
+    plot_snr_comparison(study, TARGET_ELECTRODES)
 
     print("\nDisplaying plots...")
     plt.show()

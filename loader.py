@@ -4,7 +4,7 @@ import numpy as np
 import mne
 from typing import Iterator, Tuple, List
 from scipy.signal.windows import kaiser
-from core import ConditionProperties, SubjectData
+from core_types import ConditionProperties, SubjectData
 
 class StudyLoader:
     def __init__(self, recording_frequency: float = 300.0, window_duration_s: float = 2.0):

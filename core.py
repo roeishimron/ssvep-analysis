@@ -1,32 +1,13 @@
 import sys
-from typing import NamedTuple, List, Dict, Iterator, Set, Tuple, Any, TypeVar, overload
+from typing import List, Dict, Iterator, Set, Tuple, overload
 import numpy as np
 import mne
 from scipy.stats import sem
-
-# Defined interpretable shape types
-# S=Subject, T=Trial, E=Electrode, W=Window, F=Frequency
-STEWF = Tuple[int, int, int, int, int]
-TEWF = Tuple[int, int, int, int]
-STEF = Tuple[int, int, int, int]
-TEF = Tuple[int, int, int]
-SEF = Tuple[int, int, int]
-EF = Tuple[int, int]
-
-# Semantic Type Definitions for NumPy Arrays using standard ndarray subscription
-# Format: [DType]_[Dimensions]
-
-# Complex64 Arrays (Fourier Components)
-StudyData = np.ndarray[STEWF, np.dtype[np.complex64]] 
-SubjectData = np.ndarray[TEWF, np.dtype[np.complex64]]   
-
-# Float64 Arrays (Power, SNR, Frequencies)
-StudyPower = np.ndarray[STEF, np.dtype[np.float64]]           # (S, T, E, F)
-SubjectPower = np.ndarray[EF, np.dtype[np.float64]]           # (E, F)
-
-# Indexing / Identification Arrays
-Array1D_f64 = np.ndarray[Tuple[int], np.dtype[np.float64]]             
-Array1D_i64 = np.ndarray[Tuple[int], np.dtype[np.int64]]        
+from power_specra_analyzable import PowerSpectcraAnalyzable
+from core_types import (
+    ConditionProperties, StudyData, SubjectData, StudyPower, 
+    SubjectPower, Array1D_f64, Array1D_i64
+)
 
 @overload
 def into_SNR(psd: StudyPower, n_neighbors: int = 3, n_skip: int = 1) -> StudyPower: ...
@@ -50,16 +31,6 @@ def into_SNR(psd: np.ndarray, n_neighbors: int = 3, n_skip: int = 1) -> np.ndarr
     mean_noise = np.pad(mean_noise, pad_width=pad_width, constant_values=np.inf)
     
     return psd / mean_noise
-
-class ConditionProperties(NamedTuple):
-    """
-    Unique identifier for an experimental condition.
-    """
-    target_frequency: np.float64
-    carrier_frequency: np.float64
-
-    def __repr__(self) -> str:
-        return f"ConditionProperties(target={self.target_frequency}Hz, carrier={self.carrier_frequency}Hz)"
 
 class ConditionBlob:
     """
@@ -103,7 +74,7 @@ class ConditionBlob:
     def n_frequencies(self) -> int:
         return self.data.shape[4]
 
-class ConditionView:
+class ConditionView(PowerSpectcraAnalyzable):
     """
     A configured "lens" into a ConditionBlob.
     Implements PowerSpectcraAnalyzable.
@@ -161,9 +132,15 @@ class ConditionView:
     def as_power_spectrum(self) -> Tuple[Array1D_f64, Array1D_f64]:
         # Returns (average, sem) across Subject, Trial and Electrode dimensions
         ps: StudyPower = self._get_psd() 
-        # Flatten all non-frequency dimensions: (S, T, E, F) -> (-1, F)
-        flat_ps = ps.reshape(-1, ps.shape[-1])
-        return np.average(flat_ps, axis=0), sem(flat_ps, axis=0)
+        
+        if ps.shape[0] > 1:
+            # SEM across subjects: average over trials/electrodes per subject, then SEM over subjects
+            subject_means = np.mean(ps, axis=(1, 2)) # (S, F)
+            return np.mean(subject_means, axis=0), sem(subject_means, axis=0)
+        else:
+            # Flatten all non-frequency dimensions: (S, T, E, F) -> (-1, F)
+            flat_ps = ps.reshape(-1, ps.shape[-1])
+            return np.average(flat_ps, axis=0), sem(flat_ps, axis=0)
 
     def as_snr(self) -> SubjectPower:
         # returns the average snr across subjects and trials, but keeps Electrode dimension (spatial)
@@ -176,16 +153,24 @@ class ConditionView:
         # returns (average, sem) at each frequency across Subjects, Trials and Electrodes
         ps: StudyPower = self._get_psd()
         snrs: StudyPower = into_SNR(ps)
-        flat_snrs = snrs.reshape(-1, snrs.shape[-1])
-        return np.average(flat_snrs, axis=0), sem(flat_snrs, axis=0)
+        
+        if snrs.shape[0] > 1:
+            # SEM across subjects: average over trials/electrodes per subject, then SEM over subjects
+            subject_means = np.mean(snrs, axis=(1, 2)) # (S, F)
+            print(f"taking the sem of {subject_means.shape[0]} subjects")
+            return np.mean(subject_means, axis=0), sem(subject_means, axis=0)
+        else:
+            flat_snrs = snrs.reshape(-1, snrs.shape[-1])
+            return np.average(flat_snrs, axis=0), sem(flat_snrs, axis=0)
 
     def name(self) -> str:
         return self._name
 
-    def target_frequency(self) -> float:
+    def target_frequency(self) -> np.float64:
         return self.blob.props.target_frequency
+        
 
-    def carrier_frequency(self) -> float:
+    def carrier_frequency(self) -> np.float64:
         return self.blob.props.carrier_frequency
 
     def frequencies(self) -> Array1D_f64:
@@ -299,6 +284,11 @@ class Study:
         for name in sorted(self._subjects_by_name.keys()):
             yield self._subjects_by_name[name]
 
+    def conditions(self) -> Iterator[ConditionProperties]:
+        # Return conditions sorted by target frequency, then carrier frequency
+        for props in sorted(self._blobs.keys(), key=lambda p: (p.target_frequency, p.carrier_frequency)):
+            yield props
+
     def filter_subjects(self, requirements: Set[ConditionProperties]) -> Iterator[Subject]:
         for subject in self.subjects():
             participated_in_all = True
@@ -308,6 +298,12 @@ class Study:
                     break
             if participated_in_all:
                 yield subject
+
+    def get_group_view(self, props: ConditionProperties) -> ConditionView:
+        blob = self._blobs.get(props)
+        if blob is None:
+            raise KeyError(f"Condition {props} not found in study")
+        return ConditionView(blob)
 
     def get_condition(self, props: ConditionProperties) -> ConditionView:
         blob = self._blobs.get(props)
@@ -319,8 +315,6 @@ class Study:
         s, t, e, w, f = blob.data.shape
         
         # Reshape to (1, S*T, E, W, F)
-        # We merge S and T into a single "Trial" dimension
-        # User explicitly asked to merge S into T so there's no difference.
         aggregate_data: StudyData = blob.data.reshape(1, s*t, e, w, f).astype(np.complex64)
         
         new_blob = ConditionBlob(

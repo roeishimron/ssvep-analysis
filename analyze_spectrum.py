@@ -3,7 +3,8 @@ from matplotlib import pyplot as plt
 import mne
 from power_specra_analyzable import PowerSpectcraAnalyzable
 import numpy as np
-from core import SubjectPower, Array1D_f64
+from core_types import SubjectPower, Array1D_f64
+from core import Study
 
 def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float):
 
@@ -85,3 +86,49 @@ def plot_snrs(subject: PowerSpectcraAnalyzable, raw_mne_info: Any):
 
         mne.viz.plot_topomap(channel_average, raw_mne_info,
                              vlim=(1, upper_limit), axes=ax, show=False)
+
+def plot_snr_comparison(study: Study, electrode_names: List[str]):
+    labels = []
+    snr_means = []
+    snr_sems = []
+    psd_means = []
+    psd_sems = []
+    
+    for props in study.conditions():
+        view = study.get_group_view(props)
+        # Restrict to the specific electrode
+        elec_view = view.restrict_electrodes(electrode_names)
+        
+        # Get SNR at target
+        snr_m, snr_s = elec_view.snr_at_target()
+        snr_means.append(snr_m)
+        snr_sems.append(snr_s)
+        
+        # Get PSD at target
+        psd_m, psd_s = elec_view.power_at_target()
+        psd_means.append(psd_m)
+        psd_sems.append(psd_s)
+        
+        labels.append(f"{props.carrier_frequency}Hz\n({props.target_frequency:.1f}Hz)")
+        
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10), sharex=True, label=f"comparison-{electrode_names}")
+    x = np.arange(len(labels))
+    
+    # SNR Plot
+    ax1.bar(x, snr_means, yerr=snr_sems, capsize=5, color='skyblue', edgecolor='navy')
+    ax1.set_ylabel("SNR [P/N]")
+    ax1.set_title(f"SNR at Target Frequency over {electrode_names}")
+    ax1.grid(axis='y', linestyle='--', alpha=0.7)
+    ax1.axhline(1, color='red', linestyle='--', alpha=0.5, label="Noise Floor")
+    ax1.legend()
+    
+    # PSD Plot
+    ax2.bar(x, psd_means, yerr=psd_sems, capsize=5, color='salmon', edgecolor='darkred')
+    ax2.set_ylabel("Power [microV^2]")
+    ax2.set_xlabel("Condition (Carrier / Target)")
+    ax2.set_title(f"Power at Target Frequency over {electrode_names}")
+    ax2.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    plt.xticks(x, labels)
+    fig.suptitle(f"Condition Comparison over {electrode_names}\n(Mean ± SEM across subjects)")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
