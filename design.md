@@ -4,67 +4,68 @@
 
 ### A. ConditionProperties (NamedTuple)
 The unique identifier for an experimental condition.
-- `target_frequency: float`
-- `carrier_frequency: float`
-*Note: Being a NamedTuple, this is hashable and serves as the "key" for retrieving data views.*
+- `target_frequency: np.float64`
+- `carrier_frequency: np.float64`
 
 ### B. ConditionBlob
-The heavy-duty container for a single experimental condition's data.
-- **Data**: `np.ndarray` of `complex64`. 
-- **Dimensions**: `(Subject, Trial, Electrode, Window, Frequency)`
+The primary data container for a single experimental condition.
+- **Data**: `StudyData` (NumPy array of `complex64`). 
+- **Dimensions**: `(Subject, Trial, Electrode, Window, Frequency)` (Strictly 5D)
 - **Metadata**: 
     - `props: ConditionProperties`
-    - `raw_info: mne.Info` (Essential for name-to-index electrode mapping)
-    - `subject_names: List[str]` (Maps the local `Subject` dimension to global identities)
+    - `raw_info: mne.Info`
+    - `subjects: List[Subject]`
 
 ## 2. Data Ingestion: `StudyLoader`
 
-A specialized utility responsible for traversing the file system and parsing raw data.
-- **Responsibility**: Scans experiment folders, parses EDF files via MNE, performs `rfft` to produce `complex64` data.
-- **Output**: Returns an `Iterator[Tuple[str, ConditionProperties, mne.Info, np.ndarray]]`.
+Responsible for filesystem traversal and initial signal processing.
+- **FS Pattern**: Scans folders like `10hz_2ob_60s` and parses `.edf` files.
+- **Processing**: Performs non-overlapping sliding window `rfft` to produce `complex64` components.
+- **Output**: Returns an `Iterator[Tuple[str, ConditionProperties, mne.Info, SubjectData]]`.
     - `str`: Subject name.
-    - `ConditionProperties`: Parsed from folder/filename.
-    - `mne.Info`: Recording metadata.
-    - `np.ndarray`: 4D array `(Trial, Electrode, Window, Frequency)`.
+    - `ConditionProperties`: Parsed from folder context.
+    - `SubjectData`: 4D array `(Trial, Electrode, Window, Frequency)`.
 
-## 3. The Management Layer: `Study`
+## 3. The Registry: `Study`
 
-The `Study` class manages the lifecycle of the data blobs and identifies subjects across conditions.
+The `Study` class manages the lifecycle of data and coordinates subject identities.
 
 ### Initialization
-- `__init__(data_stream: Iterator[Tuple[str, ConditionProperties, mne.Info, np.ndarray]])`:
-    - Consumes the stream and organizes data into `ConditionBlob`s.
-    - Correlates subjects across conditions to build the registry.
+- `__init__(data_stream: Iterator, min_trials: int = 3)`: 
+    - Consumes the stream and groups data by condition and subject.
+    - Enforces a minimum trial count per subject; truncates extra trials to maintain consistent dimensions.
+    - Assigns unique integer IDs to subjects.
+    - Populates each `Subject` object's internal view registry.
 
 ### API
-- `subjects() -> Iterator[Subject]`: Returns an iterator of all unique subjects.
-- `filter_subjects(requirements: Set[ConditionProperties]) -> Iterator[Subject]`: 
-    - Returns an iterator of subjects who participated in *every* condition specified.
-- `get_condition(props: ConditionProperties) -> ConditionView`:
-    - Returns a `ConditionView` representing the aggregate of *all* subjects for that condition.
-    - **Logic**: The original `Trial` dimension is averaged out, and the `Subject` dimension is promoted to be the new `Trial` dimension for the view (treating different subjects as independent trials).
+- `subjects() -> Iterator[Subject]`: Returns all unique subjects in the study (sorted alphabetically).
+- `filter_subjects(requirements: Set[ConditionProperties]) -> Iterator[Subject]`: Returns subjects who participated in the intersection of provided conditions.
+- `get_condition(props: ConditionProperties) -> ConditionView`: Returns an aggregate view where the Subject dimension is flattened into the Trial dimension `(1, S*T, E, W, F)`.
 
 ## 4. The Access Layer: `Subject` & `ConditionView`
 
 ### Subject
-A lightweight handle representing a participant.
-- `name: str`
+A lightweight handle. Identity is based on a unique `id`.
+- `name: str`, `id: int`
 - **Accessors**:
-    - `subject[props]` -> `ConditionView`: Direct access via `ConditionProperties`.
-    - `conditions() -> Iterator[Tuple[ConditionProperties, ConditionView]]`: Iterator over available conditions.
+    - `subject[props]` -> `ConditionView`: Direct access to the subject's data for a condition.
+    - `conditions()`: Iterator over all available conditions for this subject.
 
 ### ConditionView (Implements `PowerSpectcraAnalyzable`)
 A configured "lens" into a `ConditionBlob`.
 - **State**:
-    - Reference to the parent `ConditionBlob`.
-    - `subject_slice: slice | int`: Identifies one or all subjects in the blob.
-    - `electrode_indices: np.ndarray`: Current active electrodes.
+    - `blob`: Reference to the parent `ConditionBlob`.
+    - `subject_idx: int | None`: Index of the specific subject (or `None` for all subjects).
+    - `electrode_indices: Array1D_i64`: Subset of active electrodes.
 - **Methods**:
-    - `restrict_electrodes(names: List[str]) -> ConditionView`: Returns a NEW view with a subset of electrodes.
-    - `as_power_spectrum()`: Computes magnitude squared on-the-fly.
-    - `as_snr()`: Calculates SNR from the power spectrum view.
+    - `data`: Always returns a 5D view `(Subject, Trial, Electrode, Window, Frequency)`.
+    - `_get_psd()`: Calculates PSD using coherent averaging **only across windows**. Returns `(S, T, E, F)`.
+    - `as_power_spectrum()`: Returns `(mean, sem)` across S, T, and E dimensions.
+    - `as_snr()`: Returns average SNR across S and T, keeping the Electrode dimension (spatial view).
+    - `as_snr_average()`: Returns `(mean, sem)` SNR at each frequency across all non-frequency dimensions.
 
-## 5. Performance & Memory
-- **Precision**: `complex64` preserves phase integrity at half the memory cost of `complex128`.
-- **Iterators**: Prevents massive list allocations during discovery and filtering.
-- **View-Based**: No data is copied when restricting electrodes or selecting subjects; only indices and slices are updated.
+## 5. Implementation Notes
+- **Strict Typing**: Uses explicit NumPy annotations like `np.ndarray[Shape, DType]` for dimension and datatype enforcement.
+- **Coherent Averaging**: Fourier components are averaged in the complex domain **only across the window axis** before power calculation.
+- **Trial Alignment**: All subjects within a condition are enforced to have the exact same number of trials at loading time.
+- **Deterministic Alignment**: Subjects are sorted alphabetically during blob creation.

@@ -4,7 +4,7 @@ import numpy as np
 import mne
 from typing import Iterator, Tuple, List
 from scipy.signal.windows import kaiser
-from core import ConditionProperties
+from core import ConditionProperties, SubjectData
 
 class StudyLoader:
     def __init__(self, recording_frequency: float = 300.0, window_duration_s: float = 2.0):
@@ -21,9 +21,9 @@ class StudyLoader:
         modulation = float(match.group(2))
         target_freq = carrier_freq / modulation
         
-        return ConditionProperties(target_frequency=target_freq, carrier_frequency=carrier_freq)
+        return ConditionProperties(target_frequency=np.float64(target_freq), carrier_frequency=np.float64(carrier_freq))
 
-    def _process_data(self, data: np.ndarray) -> np.ndarray:
+    def _process_data(self, data: np.ndarray) -> SubjectData:
         # data shape: (Trial, Electrode, Time)
         # We want: (Trial, Electrode, Window, Frequency)
         
@@ -63,8 +63,7 @@ class StudyLoader:
         diffs = np.diff(events[:, 0], append=raw.last_samp)
         valids = np.argwhere(diffs > 1000).flatten()
         events = events[valids]
-        print(f"found {len(events)} events")
-
+        
         # Construct epochs
         epochs = mne.Epochs(
             raw,
@@ -74,11 +73,10 @@ class StudyLoader:
             tmax=60, # TODO: Derive from file
             baseline=None,
         )
-        print(f"{epochs.drop_log}")
 
         return epochs.get_data(units="mV"), raw.info
 
-    def load(self, root_dir: str) -> Iterator[Tuple[str, ConditionProperties, mne.Info, np.ndarray]]:
+    def load(self, root_dir: str) -> Iterator[Tuple[str, ConditionProperties, mne.Info, SubjectData]]:
         if not os.path.exists(root_dir):
             raise FileNotFoundError(f"Root directory {root_dir} does not exist")
 
