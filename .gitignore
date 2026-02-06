@@ -2,3 +2,5 @@
 *.bdf
 *.edf
 *.png
+*.pyc
+gemini_artifacts
