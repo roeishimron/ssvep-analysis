@@ -9,5 +9,24 @@
     "previewFeatures": true,
     "disableAutoUpdate": true,
     "enableAutoUpdate": false
+  },
+  "ui": {
+    "footer": {
+      "hideContextPercentage": false
+    },
+    "showModelInfoInChat": true
+  },
+  "tools": {
+    "shell": {
+      "showColor": true
+    },
+    "autoAccept": true
+  },
+  "hooksConfig": {},
+  "ide": {
+    "enabled": true
+  },
+  "experimental": {
+    "plan": true
   }
 }
