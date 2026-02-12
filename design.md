@@ -69,3 +69,32 @@ A configured "lens" into a `ConditionBlob`.
 - **Coherent Averaging**: Fourier components are averaged in the complex domain **only across the window axis** before power calculation.
 - **Trial Alignment**: All subjects within a condition are enforced to have the exact same number of trials at loading time.
 - **Deterministic Alignment**: Subjects are sorted alphabetically during blob creation.
+
+## 6. Analysis & Visualization
+
+### A. Single-Subject/Aggregate Spectrum (`analyze_spectrum`)
+Plots the frequency-domain characteristics of a `PowerSpectcraAnalyzable` object.
+- **SNR Spectrum**: Visualizes the Signal-to-Noise Ratio across frequencies.
+- **Amplitude Spectrum**: Visualizes power in log-scale (dB).
+- **Statistics**: Displays Mean ± STD (or SEM) across the aggregated dimensions (e.g., trials/electrodes).
+
+### B. Spatial Distribution (`plot_snrs`)
+Visualizes the topographical distribution of SNR.
+- **Harmonics**: Automatically calculates and plots SNR topomaps for the target frequency and its harmonics (1st through 8th).
+- **Max SNR Tracking**: Identifies and displays the global maximum SNR across all plotted harmonics for scaling.
+
+### C. Condition-Wise Comparison (`plot_snr_comparison`)
+Compares performance metrics across all conditions in a `Study`.
+- **Metrics**: Plots both SNR and Absolute Power at the target frequency.
+- **Group Statistics**: Aggregates data across all subjects in each condition, displaying Mean ± SEM.
+- **Baseline**: Includes a "Noise Floor" reference line at SNR=1.
+
+### D. Subject-Wise Comparison (`CarrierComparisonAnalysis`)
+Specialized class for tracking individual subject performance across a trajectory of conditions.
+- **Goal**: Subject-wise comparison of SNR at carrier frequencies (or target frequencies) across multiple conditions.
+- **Data Extraction**:
+    - Uses `Study.filter_subjects` to identify the intersection of participants who completed all requested conditions.
+    - Extracts `(mean, sem)` SNR at the target frequency for each subject and condition.
+- **Visualization**:
+    - Generates a slope plot (multi-line plot) where each line represents a single subject.
+    - Each data point displays the mean SNR and its corresponding SEM as error bars.
