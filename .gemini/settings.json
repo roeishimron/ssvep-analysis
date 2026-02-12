@@ -27,6 +27,7 @@
     "enabled": true
   },
   "experimental": {
-    "plan": true
+    "plan": true,
+    "enableAgents": true
   }
 }
