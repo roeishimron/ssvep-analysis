@@ -165,14 +165,25 @@ class ConditionView(PowerSpectcraAnalyzable):
         
     def as_phase(self, frequency: np.float64) -> Tuple[ConditionPhases, np.float64]:
         """Returns the phases of the subjects at each trial coupeled with the cycle duration (seconds)"""
-        snrs = self.snr_at_frequency(frequency)
-        target_electrode = self.electrode_indices[np.argmax(snrs)]
+        frequency_index = np.argmin(np.abs(self.frequencies() - frequency))
         
-        # should result [Subject, Trial] where the data is the phase
-        signal_components = np.squeeze(
-            self.data[..., self.frequencies() == frequency][:, :, target_electrode])
+        # Calculate SNR on the full PSD first to ensure correct neighbor convolution
+        psd_all = self._get_psd() # (S, T, E, F)
+        snrs_all = into_SNR(psd_all) # (S, T, E, F)
         
-        return np.mean(signal_components, -1), 1/frequency
+        # Select target frequency SNR and average over trials
+        snrs_target = snrs_all[..., frequency_index] # (S, T, E)
+        snrs_avg_trial = snrs_target.mean(axis=1) # (S, E)
+        
+        target_electrode_per_subject = np.argmax(snrs_avg_trial, axis=-1) # (S,)
+        
+        over_maximum_electrode = self.data[np.arange(self.data.shape[0]),:, target_electrode_per_subject]
+        
+        # Select frequency -> (S, T, W)
+        signal_components = over_maximum_electrode[..., frequency_index]
+        
+        # Average over Windows -> (S, T)
+        return np.mean(signal_components, axis=-1), 1/frequency
 
     def name(self) -> str:
         return self._name
