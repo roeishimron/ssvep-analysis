@@ -1,9 +1,9 @@
-from typing import Any, Tuple
+from typing import Any, Tuple, List
 from matplotlib import pyplot as plt
 import mne
 from power_specra_analyzable import PowerSpectcraAnalyzable
 import numpy as np
-from core_types import SubjectPower, Array1D_f64
+from core_types import SubjectPower, Array1D_f64, ConditionProperties
 from core import Study
 
 def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float):
@@ -111,24 +111,77 @@ def plot_snr_comparison(study: Study, electrode_names: List[str]):
         
         labels.append(f"{props.carrier_frequency}Hz\n({props.target_frequency:.1f}Hz)")
         
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10), sharex=True, label=f"comparison-{electrode_names}")
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10), sharex=True, label=f"comparison-{electrode_names}")
     x = np.arange(len(labels))
     
     # SNR Plot
-    ax1.bar(x, snr_means, yerr=snr_sems, capsize=5, color='skyblue', edgecolor='navy')
-    ax1.set_ylabel("SNR [P/N]")
-    ax1.set_title(f"SNR at Target Frequency over {electrode_names}")
-    ax1.grid(axis='y', linestyle='--', alpha=0.7)
-    ax1.axhline(1, color='red', linestyle='--', alpha=0.5, label="Noise Floor")
-    ax1.legend()
-    
-    # PSD Plot
-    ax2.bar(x, psd_means, yerr=psd_sems, capsize=5, color='salmon', edgecolor='darkred')
-    ax2.set_ylabel("Power [microV^2]")
-    ax2.set_xlabel("Condition (Carrier / Target)")
-    ax2.set_title(f"Power at Target Frequency over {electrode_names}")
-    ax2.grid(axis='y', linestyle='--', alpha=0.7)
+    ax.bar(x, snr_means, yerr=snr_sems, capsize=5, color='skyblue', edgecolor='navy')
+    ax.set_ylabel("SNR [P/N]")
+    ax.set_title(f"SNR at Target Frequency over {electrode_names}")
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    ax.axhline(1, color='red', linestyle='--', alpha=0.5, label="Noise Floor")
+    ax.legend()
     
     plt.xticks(x, labels)
     fig.suptitle(f"Condition Comparison over {electrode_names}\n(Mean ± SEM across subjects)")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+class CarrierComparisonAnalysis:
+    """
+    Analyzes and plots SNR at carrier frequencies for subjects who participated in specific carrier conditions.
+    """
+    def __init__(self, study: Study, carriers: List[float], electrode_names: List[str]):
+        self.study = study
+        self.carriers = [np.float64(c) for c in carriers]
+        self.electrode_names = electrode_names
+
+    def _get_comparison_data(self) -> List[Tuple[str, List[float]]]:
+        """
+        Extracts SNR at carrier frequencies for subjects who participated in all requested conditions.
+        Returns: List of (subject_name, [snr_carrier1, snr_carrier2, ...])
+        """
+        # We assume target frequency is 5Hz for these comparisons as per user's hardcoded update
+        props_list = [ConditionProperties(np.float64(5), c) for c in self.carriers]
+        
+        common_subjects = list(self.study.filter_subjects(set(props_list)))
+        
+        results = []
+        for subject in common_subjects:
+            subject_snrs = []
+            for props in props_list:
+                view = subject[props].restrict_electrodes(self.electrode_names)
+                snr, _ = view.snr_at_target()
+                subject_snrs.append(float(snr))
+            
+            results.append((subject.name, subject_snrs))
+            
+        return results
+
+    def plot(self):
+        """
+        Creates a slope plot comparing SNR across carrier frequencies.
+        """
+        data = self._get_comparison_data()
+        if not data:
+            print(f"No subjects found who participated in all requested conditions: {self.carriers}Hz.")
+            return
+
+        fig, ax = plt.subplots(figsize=(10, 6), label=f"carrier-comparison-{'-'.join(map(str, self.carriers))}")
+        
+        x = np.arange(len(self.carriers))
+        for name, snrs in data:
+            ax.plot(x, snrs, marker='o', label=name)
+            # Add text labels
+            for i, snr in enumerate(snrs):
+                ax.text(i, snr, f"{snr:.2f}", horizontalalignment='center', verticalalignment='bottom')
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{c} Hz" for c in self.carriers])
+        ax.set_ylabel("SNR at Carrier Frequency")
+        ax.set_title(f"Subject-wise SNR Comparison across Carriers\n(Electrodes: {self.electrode_names})")
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        ax.set_xlim(-0.5, len(self.carriers) - 0.5)
+        
+        # Place legend outside
+        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.tight_layout()

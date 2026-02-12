@@ -5,7 +5,9 @@ import numpy as np
 from core import Study
 from core_types import ConditionProperties
 from loader import StudyLoader
-from analyze_spectrum import analyze_spectrum, plot_snrs, plot_snr_comparison
+from analyze_spectrum import (
+    analyze_spectrum, plot_snrs, plot_snr_comparison, CarrierComparisonAnalysis
+)
 
 def main():
     if len(sys.argv) < 2:
@@ -64,6 +66,14 @@ def main():
     # 4. Global Analysis: SNR Comparison across conditions
     print("\nPlotting SNR comparison across conditions for T5...")
     plot_snr_comparison(study, TARGET_ELECTRODES)
+
+    # 5. Subject-wise Carrier Comparison (10Hz vs 15Hz)
+    print("\nPlotting Subject-wise SNR Comparison (10Hz vs 15Hz carrier) for T5...")
+    try:
+        comparison = CarrierComparisonAnalysis(study, [10.0, 15.0], TARGET_ELECTRODES)
+        comparison.plot()
+    except ValueError as e:
+        print(f"Skipping carrier comparison: {e}")
 
     print("\nDisplaying plots...")
     plt.show()
