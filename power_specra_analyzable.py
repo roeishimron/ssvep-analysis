@@ -2,6 +2,7 @@ import numpy as np
 from typing import Protocol, Tuple, runtime_checkable
 from core_types import SubjectPower, Array1D_f64
 
+
 @runtime_checkable
 class PowerSpectcraAnalyzable(Protocol):
     def as_power_spectrum(self) -> Tuple[Array1D_f64, Array1D_f64]:
@@ -32,34 +33,32 @@ class PowerSpectcraAnalyzable(Protocol):
         """returns the array of frequencies"""
         ...
 
-    def snr_at_target(self) -> Tuple[np.float64, np.float64]:
+    def snr_at_frequency(self, target) -> Tuple[np.float64, np.float64]:
         """returns the (average, sem) snr at target frequency"""
         freqs = self.frequencies()
-        target = self.target_frequency()
         idx = np.argmin(np.abs(freqs - target))
         means, sems = self.as_snr_average()
         return means[idx], sems[idx]
+
+    def snr_at_target(self) -> Tuple[np.float64, np.float64]:
+        """returns the (average, sem) snr at target frequency"""
+        return self.snr_at_frequency(self.target_frequency())
 
     def snr_at_carrier(self) -> Tuple[np.float64, np.float64]:
         """returns the (average, sem) snr at carrier frequency"""
-        freqs = self.frequencies()
-        carrier = self.carrier_frequency()
-        idx = np.argmin(np.abs(freqs - carrier))
-        means, sems = self.as_snr_average()
-        return means[idx], sems[idx]
+        return self.snr_at_frequency(self.carrier_frequency())
 
-    def power_at_target(self) -> Tuple[np.float64, np.float64]:
-        """returns the (average, sem) power at target frequency"""
+    def power_at_frequency(self, target) -> Tuple[np.float64, np.float64]:
+        """returns the (average, sem) snr at target frequency"""
         freqs = self.frequencies()
-        target = self.target_frequency()
         idx = np.argmin(np.abs(freqs - target))
         means, sems = self.as_power_spectrum()
         return means[idx], sems[idx]
 
+    def power_at_target(self) -> Tuple[np.float64, np.float64]:
+        """returns the (average, sem) snr at target frequency"""
+        return self.power_at_frequency(self.target_frequency())
+
     def power_at_carrier(self) -> Tuple[np.float64, np.float64]:
-        """returns the (average, sem) power at carrier frequency"""
-        freqs = self.frequencies()
-        carrier = self.carrier_frequency()
-        idx = np.argmin(np.abs(freqs - carrier))
-        means, sems = self.as_power_spectrum()
-        return means[idx], sems[idx]
+        """returns the (average, sem) snr at carrier frequency"""
+        return self.power_at_frequency(self.carrier_frequency())

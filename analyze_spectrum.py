@@ -1,4 +1,4 @@
-from typing import Any, Tuple, List
+from typing import Any, Tuple, List, Iterator
 from matplotlib import pyplot as plt
 import mne
 from power_specra_analyzable import PowerSpectcraAnalyzable
@@ -135,17 +135,16 @@ class CarrierComparisonAnalysis:
         self.carriers = [np.float64(c) for c in carriers]
         self.electrode_names = electrode_names
 
-    def _get_comparison_data(self) -> List[Tuple[str, List[float]]]:
+    def _get_comparison_data(self) -> Iterator[Tuple[str, List[float]]]:
         """
         Extracts SNR at carrier frequencies for subjects who participated in all requested conditions.
-        Returns: List of (subject_name, [snr_carrier1, snr_carrier2, ...])
+        Returns: Iterator of (subject_name, [snr_carrier1, snr_carrier2, ...])
         """
         # We assume target frequency is 5Hz for these comparisons as per user's hardcoded update
         props_list = [ConditionProperties(np.float64(5), c) for c in self.carriers]
         
         common_subjects = list(self.study.filter_subjects(set(props_list)))
         
-        results = []
         for subject in common_subjects:
             subject_snrs = []
             for props in props_list:
@@ -153,15 +152,48 @@ class CarrierComparisonAnalysis:
                 snr, _ = view.snr_at_target()
                 subject_snrs.append(float(snr))
             
-            results.append((subject.name, subject_snrs))
-            
-        return results
+            yield (subject.name, subject_snrs)
+
+    def _calculate_slope(self, item: Tuple[str, List[float]]) -> Tuple[str, float]:
+        name, snrs = item
+        if len(self.carriers) < 2:
+            return (name, 0.0)
+        slope, _ = np.polyfit(self.carriers, snrs, 1)
+        return (name, float(slope))
+
+    def slopes(self, data: Iterator[Tuple[str, List[float]]]) -> Iterator[Tuple[str, float]]:
+        """
+        Calculates the slope of SNR vs Carrier Frequency for each subject.
+        """
+        return map(self._calculate_slope, data)
+
+    def plot_slopes_distribution(self):
+        """
+        Plots the distribution of SNR slopes.
+        """
+        # We need to list-ify the data to use it for slopes
+        data = list(self._get_comparison_data())
+        if not data:
+             print("No data for slopes distribution.")
+             return
+
+        slopes_iter = self.slopes(iter(data))
+        slopes = [s for _, s in slopes_iter]
+        
+        fig, ax = plt.subplots(figsize=(8, 6), label=f"slopes-dist-{'-'.join(map(str, self.carriers))}")
+        ax.hist(slopes, bins='auto', edgecolor='black', alpha=0.7)
+        ax.set_xlabel("Slope (SNR/Hz)")
+        ax.set_ylabel("Count")
+        ax.set_title(f"Distribution of SNR Slopes across Carriers: {self.carriers} Hz\n(Electrodes: {self.electrode_names})")
+        ax.axvline(np.float64(np.mean(np.array(slopes))), 
+                   color='red', linestyle='--', linewidth=1)
+        plt.tight_layout()
 
     def plot(self):
         """
         Creates a slope plot comparing SNR across carrier frequencies.
         """
-        data = self._get_comparison_data()
+        data = list(self._get_comparison_data())
         if not data:
             print(f"No subjects found who participated in all requested conditions: {self.carriers}Hz.")
             return

@@ -6,7 +6,7 @@ from scipy.stats import sem
 from power_specra_analyzable import PowerSpectcraAnalyzable
 from core_types import (
     ConditionProperties, StudyData, SubjectData, StudyPower, 
-    SubjectPower, Array1D_f64, Array1D_i64
+    SubjectPower, Array1D_f64, Array1D_i64, ConditionPhases
 )
 
 @overload
@@ -162,6 +162,17 @@ class ConditionView(PowerSpectcraAnalyzable):
         else:
             flat_snrs = snrs.reshape(-1, snrs.shape[-1])
             return np.average(flat_snrs, axis=0), sem(flat_snrs, axis=0)
+        
+    def as_phase(self, frequency: np.float64) -> Tuple[ConditionPhases, np.float64]:
+        """Returns the phases of the subjects at each trial coupeled with the cycle duration (seconds)"""
+        snrs = self.snr_at_frequency(frequency)
+        target_electrode = self.electrode_indices[np.argmax(snrs)]
+        
+        # should result [Subject, Trial] where the data is the phase
+        signal_components = np.squeeze(
+            self.data[..., self.frequencies() == frequency][:, :, target_electrode])
+        
+        return np.mean(signal_components, -1), 1/frequency
 
     def name(self) -> str:
         return self._name

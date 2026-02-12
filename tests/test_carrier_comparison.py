@@ -45,17 +45,50 @@ class TestCarrierComparisonAnalysis(unittest.TestCase):
         mock_s2.__getitem__.side_effect = s2_getitem
 
         analysis = CarrierComparisonAnalysis(self.mock_study, self.carriers, self.electrodes)
-        data = analysis._get_comparison_data()
+        # _get_comparison_data returns an iterator now
+        data = list(analysis._get_comparison_data())
         
         self.assertEqual(len(data), 2)
-        self.assertEqual(data[0], ("S1", [2.0, 3.0], [0.1, 0.2]))
-        self.assertEqual(data[1], ("S2", [1.5, 2.5], [0.05, 0.15]))
+        # Updated expectations: (name, snrs)
+        self.assertEqual(data[0], ("S1", [2.0, 3.0]))
+        self.assertEqual(data[1], ("S2", [1.5, 2.5]))
 
     def test_no_common_subjects(self):
         self.mock_study.filter_subjects.return_value = []
         analysis = CarrierComparisonAnalysis(self.mock_study, self.carriers, self.electrodes)
-        data = analysis._get_comparison_data()
+        data = list(analysis._get_comparison_data())
         self.assertEqual(len(data), 0)
+
+    def test_snr_slopes(self):
+        analysis = CarrierComparisonAnalysis(self.mock_study, self.carriers, self.electrodes)
+        
+        # Test data: S1 has SNR 2.0 at 10Hz and 3.0 at 15Hz.
+        # Slope = (3.0 - 2.0) / (15.0 - 10.0) = 1.0 / 5.0 = 0.2
+        
+        # S2 has SNR 1.5 at 10Hz and 2.5 at 15Hz.
+        # Slope = (2.5 - 1.5) / (15.0 - 10.0) = 1.0 / 5.0 = 0.2
+        
+        # Adding S3: SNR 5.0 at 10Hz, 4.0 at 15Hz
+        # Slope = (4.0 - 5.0) / 5.0 = -0.2
+        
+        test_data = [
+            ("S1", [2.0, 3.0]),
+            ("S2", [1.5, 2.5]),
+            ("S3", [5.0, 4.0])
+        ]
+        
+        slopes_iter = analysis.slopes(iter(test_data))
+        slopes = list(slopes_iter)
+        
+        self.assertEqual(len(slopes), 3)
+        self.assertEqual(slopes[0][0], "S1")
+        self.assertAlmostEqual(slopes[0][1], 0.2)
+        
+        self.assertEqual(slopes[1][0], "S2")
+        self.assertAlmostEqual(slopes[1][1], 0.2)
+
+        self.assertEqual(slopes[2][0], "S3")
+        self.assertAlmostEqual(slopes[2][1], -0.2)
 
 if __name__ == '__main__':
     unittest.main()

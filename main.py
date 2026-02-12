@@ -72,6 +72,7 @@ def main():
     try:
         comparison = CarrierComparisonAnalysis(study, [10.0, 15.0], TARGET_ELECTRODES)
         comparison.plot()
+        comparison.plot_slopes_distribution()
     except ValueError as e:
         print(f"Skipping carrier comparison: {e}")
 

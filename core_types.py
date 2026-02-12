@@ -9,6 +9,7 @@ STEF = Tuple[int, int, int, int]
 TEF = Tuple[int, int, int]
 SEF = Tuple[int, int, int]
 EF = Tuple[int, int]
+ST = Tuple[int, int]
 
 # Semantic Type Definitions for NumPy Arrays
 StudyData = np.ndarray[STEWF, np.dtype[np.complex64]] 
@@ -16,6 +17,8 @@ SubjectData = np.ndarray[TEWF, np.dtype[np.complex64]]
 
 StudyPower = np.ndarray[STEF, np.dtype[np.float64]]           # (S, T, E, F)
 SubjectPower = np.ndarray[EF, np.dtype[np.float64]]           # (E, F)
+
+ConditionPhases = np.ndarray[ST, np.dtype[np.complex64]]
 
 Array1D_f64 = np.ndarray[Tuple[int], np.dtype[np.float64]]             
 Array1D_i64 = np.ndarray[Tuple[int], np.dtype[np.int64]]        
