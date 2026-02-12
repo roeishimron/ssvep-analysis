@@ -195,6 +195,54 @@ class ConditionView(PowerSpectcraAnalyzable):
     def carrier_frequency(self) -> np.float64:
         return self.blob.props.carrier_frequency
 
+    def calculate_processing_time(self) -> np.ndarray:
+        """
+        Calculates the time difference (latency) between the carrier frequency response 
+        and the target frequency response.
+        
+        The method accounts for the phase ambiguity arising from different cycle durations.
+        If the carrier frequency is M times the target frequency, there are M possible 
+        time differences within one target cycle. The method selects the one closest 
+        to 50ms (0.05s), based on literature for typical neural latencies.
+        
+        Returns:
+            np.ndarray: A 2D array of shape (Subject, Trial) containing the calculated 
+                        time differences in seconds.
+        """
+        f_target = self.target_frequency()
+        f_carrier = self.carrier_frequency()
+        
+        # Get phases and cycle durations
+        c_target, T_target = self.as_phase(f_target)
+        c_carrier, T_carrier = self.as_phase(f_carrier)
+        
+        # Calculate time within cycle for each frequency [0, T)
+        t_target = (np.angle(c_target) % (2 * np.pi)) / (2 * np.pi) * T_target
+        t_carrier = (np.angle(c_carrier) % (2 * np.pi)) / (2 * np.pi) * T_carrier
+        
+        # Base time difference (carrier peak relative to target peak)
+        dt_base = (t_carrier - t_target) % T_target
+        
+        # Number of carrier cycles in one target cycle
+        n_cycles = int(np.round(T_target / T_carrier))
+        
+        # Heuristic target latency: 50ms
+        target_latency = 0.05
+        
+        # Vectorized candidate generation and selection
+        ks = np.arange(n_cycles)
+        # dt_ks shape: (Subject, Trial, n_cycles)
+        dt_ks = (dt_base[..., np.newaxis] + ks * T_carrier) % T_target
+        
+        # Circular distance on T_target
+        distances = np.abs(dt_ks - target_latency)
+        distances = np.minimum(distances, T_target - distances)
+        
+        best_k_indices = np.argmin(distances, axis=-1)
+        best_dts = np.take_along_axis(dt_ks, best_k_indices[..., np.newaxis], axis=-1).squeeze(axis=-1)
+            
+        return best_dts
+
     def frequencies(self) -> Array1D_f64:
         sfreq = self.blob.raw_info['sfreq']
         n_points = self.data.shape[-1]

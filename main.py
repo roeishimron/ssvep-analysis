@@ -6,7 +6,8 @@ from core import Study
 from core_types import ConditionProperties
 from loader import StudyLoader
 from analyze_spectrum import (
-    analyze_spectrum, plot_snrs, plot_snr_comparison, CarrierComparisonAnalysis
+    analyze_spectrum, plot_snrs, plot_snr_comparison, CarrierComparisonAnalysis,
+    plot_latency_variance_vs_snr_slope
 )
 
 def main():
@@ -75,6 +76,42 @@ def main():
         comparison.plot_slopes_distribution()
     except ValueError as e:
         print(f"Skipping carrier comparison: {e}")
+
+    # 6. Phase Latency Analysis for 10Hz carrier group
+    print("\nAnalyzing Phase Latency for 10Hz carrier group...")
+    latencies = []
+    for props in conditions:
+        if np.isclose(props.carrier_frequency, 10.0):
+            try:
+                view = study.get_condition(props)
+                # calculate_processing_time returns (Subject, Trial)
+                latencies.append(view.calculate_processing_time().flatten())
+            except Exception as e:
+                print(f"Could not calculate processing time for {props}: {e}")
+    
+    if latencies:
+        all_latencies = np.concatenate(latencies)
+        plt.figure(figsize=(8, 6), label="phase-latency-10hz")
+        plt.hist(all_latencies * 1000, bins=15, edgecolor='black', alpha=0.7)
+        mean_lat = np.mean(all_latencies) * 1000
+        plt.axvline(mean_lat, color='red', linestyle='--', label=f'Mean: {mean_lat:.1f}ms')
+        plt.title("Distribution of Processing Time (10Hz Carrier group)")
+        plt.xlabel("Latency (ms)")
+        plt.ylabel("Count (Trials x Subjects)")
+        plt.legend()
+        plt.grid(axis='y', alpha=0.3)
+    else:
+        print("No 10Hz carrier conditions found for phase latency analysis.")
+
+    # 7. Latency Variance vs. SNR Slope Analysis
+    print("\nAnalyzing Latency Variance vs. SNR Slope...")
+    try:
+        # Using 10, 15, 20 Hz carriers for slope, and 10Hz for latency baseline
+        plot_latency_variance_vs_snr_slope(
+            study, [10.0, 15.0], 10.0, TARGET_ELECTRODES
+        )
+    except Exception as e:
+        print(f"Could not perform Latency Variance vs SNR Slope analysis: {e}")
 
     print("\nDisplaying plots...")
     plt.show()
