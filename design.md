@@ -94,7 +94,9 @@ Specialized class for tracking individual subject performance across a trajector
 - **Goal**: Subject-wise comparison of SNR at carrier frequencies (or target frequencies) across multiple conditions.
 - **Data Extraction**:
     - Uses `Study.filter_subjects` to identify the intersection of participants who completed all requested conditions.
-    - Extracts `(mean, sem)` SNR at the target frequency for each subject and condition.
+    - `_get_comparison_data()`: Returns an iterator of `(Subject Name, List[SNR])` tuples.
+- **Analysis**:
+    - `snr_slopes(data)`: Calculates the linear regression slope of SNR vs. Carrier Frequency for each subject.
 - **Visualization**:
-    - Generates a slope plot (multi-line plot) where each line represents a single subject.
-    - Each data point displays the mean SNR and its corresponding SEM as error bars.
+    - `plot()`: Generates a slope plot (multi-line plot) where each line represents a single subject with SNR values labeled at each point.
+    - `plot_slopes_distribution()`: Displays a histogram of the calculated SNR slopes across the subject population.
