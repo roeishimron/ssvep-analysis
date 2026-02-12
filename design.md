@@ -63,6 +63,7 @@ A configured "lens" into a `ConditionBlob`.
     - `as_power_spectrum()`: Returns `(mean, sem)` across S, T, and E dimensions.
     - `as_snr()`: Returns average SNR across S and T, keeping the Electrode dimension (spatial view).
     - `as_snr_average()`: Returns `(mean, sem)` SNR at each frequency across all non-frequency dimensions.
+    - `as_phase(frequency)`: Returns `(phases, cycle_duration)` where `phases` is `(Subject, Trial)` complex values at the best electrode, and `cycle_duration` is in seconds.
 
 ## 5. Implementation Notes
 - **Strict Typing**: Uses explicit NumPy annotations like `np.ndarray[Shape, DType]` for dimension and datatype enforcement.
