@@ -255,7 +255,7 @@ def plot_latency_variance_vs_snr_slope(study: Study,
 
             names.append(name)
             slope_values.append(float(slope))
-            variance_values.append(np.log10(variance))
+            variance_values.append(np.log(variance))
         except KeyError:
             continue
 
@@ -278,6 +278,6 @@ def plot_latency_variance_vs_snr_slope(study: Study,
 
     ax.set_title(title)
     ax.set_xlabel("SNR Slope (SNR/Hz)")
-    ax.set_ylabel("Latency Variance (s²)")
+    ax.set_ylabel("Latency Variance log(s²)")
     ax.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
