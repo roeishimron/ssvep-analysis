@@ -168,27 +168,6 @@ class CarrierComparisonAnalysis:
         """
         return map(self._calculate_slope, data)
 
-    def plot_slopes_distribution(self):
-        """
-        Plots the distribution of SNR slopes.
-        """
-        # We need to list-ify the data to use it for slopes
-        data = list(self._get_comparison_data())
-        if not data:
-             print("No data for slopes distribution.")
-             return
-
-        slopes_iter = self.slopes(iter(data))
-        slopes = [s for _, s in slopes_iter]
-        
-        fig, ax = plt.subplots(figsize=(8, 6), label=f"slopes-dist-{'-'.join(map(str, self.carriers))}")
-        ax.hist(slopes, bins='auto', edgecolor='black', alpha=0.7)
-        ax.set_xlabel("Slope (SNR/Hz)")
-        ax.set_ylabel("Count")
-        ax.set_title(f"Distribution of SNR Slopes across Carriers: {self.carriers} Hz\n(Electrodes: {self.electrode_names})")
-        ax.axvline(np.float64(np.mean(np.array(slopes))), 
-                   color='red', linestyle='--', linewidth=1)
-        plt.tight_layout()
 
     def plot(self):
         """
