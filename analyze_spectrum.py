@@ -222,12 +222,13 @@ class CarrierComparisonAnalysis:
 def plot_latency_variance_vs_snr_slope(study: Study,
                                        carriers: List[float],
                                        latency_carrier: float,
-                                       electrode_names: List[str]):
+                                       target_electrodes: List[str],
+                                       carrier_electrodes: List[str]):
     """
     Analyzes and plots the relationship between the variance of neural processing time
     and the SNR slope across different carrier frequencies.
     """
-    comparison = CarrierComparisonAnalysis(study, carriers, electrode_names)
+    comparison = CarrierComparisonAnalysis(study, carriers, target_electrodes)
     # Re-use logic for identifying common subjects and their slopes
     data = list(comparison._get_comparison_data())
     if not data:
@@ -247,14 +248,14 @@ def plot_latency_variance_vs_snr_slope(study: Study,
         props = ConditionProperties(np.float64(5), np.float64(latency_carrier))
 
         try:
-            view = subject[props].restrict_electrodes(electrode_names)
+            view = subject[props].restrict_electrodes(target_electrodes + carrier_electrodes)
             # calculate_processing_time returns (Subject, Trial)
             latencies = view.calculate_processing_time()
             variance = float(np.var(latencies))
 
             names.append(name)
             slope_values.append(float(slope))
-            variance_values.append(variance)
+            variance_values.append(np.log10(variance))
         except KeyError:
             continue
 
