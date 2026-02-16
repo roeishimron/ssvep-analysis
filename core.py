@@ -227,11 +227,11 @@ class ConditionView(PowerSpectcraAnalyzable):
         assert T_target > 0.05
         expected_distance = np.exp((0.05/T_target*2*np.pi)*1j)
 
-        best_distances = np.argmin(np.abs(np.angle(distances / expected_distance)), -1)
+        best_distances = np.argmin(np.abs(np.angle(distances / expected_distance)), -1, keepdims=True)
         
-        best_dts = np.take_along_axis(distances, best_distances[..., np.newaxis], axis=-1).squeeze(axis=-1)
+        best_dts = np.take_along_axis(distances, best_distances, axis=-1).squeeze(-1)
         
-        return np.angle(best_dts)/2/np.pi * T_target
+        return (np.angle(best_dts))/2/np.pi * T_target
 
     def frequencies(self) -> Array1D_f64:
         sfreq = self.blob.raw_info['sfreq']
