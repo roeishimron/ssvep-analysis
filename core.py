@@ -215,33 +215,23 @@ class ConditionView(PowerSpectcraAnalyzable):
         # Get phases and cycle durations
         c_target, T_target = self.as_phase(f_target)
         c_carrier, T_carrier = self.as_phase(f_carrier)
+
+        assert T_target // T_carrier == T_target / T_carrier
+        inflation_ratio = T_target // T_carrier
+        normalized_target, normalized_carrier = c_target / np.abs(c_target), c_carrier / np.abs(c_carrier)
+        adjusted_carrier = normalized_carrier ** (1/inflation_ratio) # its phase should be lowered down
+        regions = np.exp(np.arange(inflation_ratio)*2*np.pi*1j/inflation_ratio)
+        possible_carriers = adjusted_carrier[..., np.newaxis] * regions
+        distances = normalized_target[..., np.newaxis] / possible_carriers
+
+        assert T_target > 0.05
+        expected_distance = np.exp((0.05/T_target*2*np.pi)*1j)
+
+        best_distances = np.argmin(np.abs(np.angle(distances / expected_distance)), -1)
         
-        # Calculate time within cycle for each frequency [0, T)
-        t_target = (np.angle(c_target) % (2 * np.pi)) / (2 * np.pi) * T_target
-        t_carrier = (np.angle(c_carrier) % (2 * np.pi)) / (2 * np.pi) * T_carrier
+        best_dts = np.take_along_axis(distances, best_distances[..., np.newaxis], axis=-1).squeeze(axis=-1)
         
-        # Base time difference (carrier peak relative to target peak)
-        dt_base = (t_carrier - t_target) % T_target
-        
-        # Number of carrier cycles in one target cycle
-        n_cycles = int(np.round(T_target / T_carrier))
-        
-        # Heuristic target latency: 50ms
-        target_latency = 0.05
-        
-        # Vectorized candidate generation and selection
-        ks = np.arange(n_cycles)
-        # dt_ks shape: (Subject, Trial, n_cycles)
-        dt_ks = (dt_base[..., np.newaxis] + ks * T_carrier) % T_target
-        
-        # Circular distance on T_target
-        distances = np.abs(dt_ks - target_latency)
-        distances = np.minimum(distances, T_target - distances)
-        
-        best_k_indices = np.argmin(distances, axis=-1)
-        best_dts = np.take_along_axis(dt_ks, best_k_indices[..., np.newaxis], axis=-1).squeeze(axis=-1)
-            
-        return best_dts
+        return np.angle(best_dts)/2/np.pi * T_target
 
     def frequencies(self) -> Array1D_f64:
         sfreq = self.blob.raw_info['sfreq']
