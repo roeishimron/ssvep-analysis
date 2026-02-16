@@ -7,7 +7,7 @@ from core_types import ConditionProperties
 from loader import StudyLoader
 from analyze_spectrum import (
     analyze_spectrum, plot_snrs, plot_snr_comparison, CarrierComparisonAnalysis,
-    plot_latency_variance_vs_snr_slope
+    plot_latency_mean_vs_snr_slope
 )
 
 def main():
@@ -91,15 +91,15 @@ def main():
     plt.legend()
     plt.grid(axis='y', alpha=0.3)
 
-    # 7. Latency Variance vs. SNR Slope Analysis
-    print("\nAnalyzing Latency Variance vs. SNR Slope...")
+    # 7. Latency mean vs. SNR Slope Analysis
+    print("\nAnalyzing Latency mean vs. SNR Slope...")
     try:
         # Using 10, 15 Hz carriers for slope, and 10Hz for latency baseline
-        plot_latency_variance_vs_snr_slope(
+        plot_latency_mean_vs_snr_slope(
             study, [10, 15, 20], 10, TARGET_ELECTRODES, V1_ELECTRODES
         )
     except Exception as e:
-        print(f"Could not perform Latency Variance vs SNR Slope analysis: {e}")
+        print(f"Could not perform Latency mean vs SNR Slope analysis: {e}")
 
     print("\nDisplaying plots...")
     plt.show()

@@ -43,45 +43,42 @@ class TestProcessingTime(unittest.TestCase):
         # Target: 5Hz (T=200ms), Carrier: 10Hz (T=100ms)
         # 50ms is the heuristic.
         
-        # Case 1: dt1 is 60ms, dt2 is 160ms. Should pick 60ms.
-        # t_target = 0 (phase 0)
-        # t_carrier = 60ms (phase 0.6 * 2pi for 10Hz? No, 60ms/100ms * 2pi = 1.2pi)
+        # Case 1: t_target=0, t_carrier=60ms. 
+        # diff = 0 - 60 = -60 = 140ms.
+        # Candidates: 140, 140+100=240=40.
+        # 40ms is closer to 50ms.
         view = self._create_mock_view(5.0, 10.0, 0, 1.2 * np.pi)
         latencies = view.calculate_processing_time()
-        # Expect 0.06
-        self.assertAlmostEqual(latencies[0, 0], 0.06, places=5)
+        # Expect 0.04
+        self.assertAlmostEqual(latencies[0, 0], 0.04, places=5)
         
-        # Case 2: dt1 is 140ms, dt2 is 40ms. Should pick 40ms.
-        # t_target = 0
-        # t_carrier = 40ms -> phase = 0.4 * 2pi = 0.8pi
+        # Case 2: t_target=0, t_carrier=40ms.
+        # diff = 0 - 40 = -40 = 160ms.
+        # Candidates: 160, 60.
+        # 60ms is closer to 50ms.
         view = self._create_mock_view(5.0, 10.0, 0, 0.8 * np.pi)
         latencies = view.calculate_processing_time()
-        self.assertAlmostEqual(latencies[0, 0], 0.04, places=5)
+        self.assertAlmostEqual(latencies[0, 0], 0.06, places=5)
 
     def test_processing_time_3to1_ratio(self):
         # Target: 5Hz (T=200ms), Carrier: 15Hz (T=66.6ms)
         # n_cycles = 3.
-        # Candidates: dt1, dt1 + 66.6, dt1 + 133.3
-        
-        # Suppose target_t = 0
-        # carrier_t = 10ms. Candidates: 10, 76.6, 143.3
-        # 50ms - 10 = 40.
-        # 76.6 - 50 = 26.6.
-        # 143.3 - 50 = 93.3.
-        # Closest is 76.6ms.
+        # carrier_t = 10ms. target_t = 0.
+        # diff = -10. Candidates: -10, 56.6, 123.3.
+        # 56.6 is closest to 50.
         
         carrier_phase = (0.01 / (1/15.0)) * 2 * np.pi
         view = self._create_mock_view(5.0, 15.0, 0, carrier_phase)
         latencies = view.calculate_processing_time()
-        self.assertAlmostEqual(latencies[0, 0], 0.01 + 1/15.0, places=5)
+        # 56.6ms is T_carrier - 10ms.
+        self.assertAlmostEqual(latencies[0, 0], 1/15.0 - 0.01, places=5)
 
     def test_circularity_near_boundary(self):
         # Target 5Hz (T=200ms), Carrier 10Hz (T=100ms)
-        # Suppose t_target = 190ms (phase = 1.9 * pi? No, 190/200 * 2pi = 1.9pi)
-        # Suppose t_carrier = 40ms (phase = 0.4 * 2pi = 0.8pi)
-        # dt1 = (40 - 190) % 200 = -150 % 200 = 50ms.
-        # dt2 = (50 + 100) % 200 = 150ms.
-        # Should pick 50ms exactly.
+        # t_target = 190ms. t_carrier = 40ms.
+        # diff = 190 - 40 = 150ms.
+        # Candidates: 150, 250%200 = 50.
+        # 50ms is exactly target latency.
         
         view = self._create_mock_view(5.0, 10.0, 1.9 * np.pi, 0.8 * np.pi)
         latencies = view.calculate_processing_time()

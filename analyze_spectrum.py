@@ -198,20 +198,20 @@ class CarrierComparisonAnalysis:
         ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
         plt.tight_layout()
 
-def plot_latency_variance_vs_snr_slope(study: Study,
+def plot_latency_mean_vs_snr_slope(study: Study,
                                        carriers: List[float],
                                        latency_carrier: float,
                                        target_electrodes: List[str],
                                        carrier_electrodes: List[str]):
     """
-    Analyzes and plots the relationship between the variance of neural processing time
+    Analyzes and plots the relationship between the mean of neural processing time
     and the SNR slope across different carrier frequencies.
     """
     comparison = CarrierComparisonAnalysis(study, carriers, target_electrodes)
     # Re-use logic for identifying common subjects and their slopes
     data = list(comparison._get_comparison_data())
     if not data:
-        print("No data for Latency Variance vs SNR Slope analysis.")
+        print("No data for Latency mean vs SNR Slope analysis.")
         return
 
     slopes_dict = dict(comparison.slopes(iter(data)))
@@ -219,7 +219,7 @@ def plot_latency_variance_vs_snr_slope(study: Study,
 
     names = []
     slope_values = []
-    variance_values = []
+    mean_values = []
 
     for name, slope in slopes_dict.items():
         subject = all_subjects[name]
@@ -230,33 +230,33 @@ def plot_latency_variance_vs_snr_slope(study: Study,
             view = subject[props].restrict_electrodes(target_electrodes + carrier_electrodes)
             # calculate_processing_time returns (Subject, Trial)
             latencies = view.calculate_processing_time()
-            variance = float(np.var(latencies))
+            mean = float(np.mean(latencies))
 
             names.append(name)
             slope_values.append(float(slope))
-            variance_values.append(np.log(variance))
+            mean_values.append(mean)
         except KeyError:
             continue
 
     if not slope_values:
-        print("No matching subjects for Latency Variance vs SNR Slope plot.")
+        print("No matching subjects for Latency mean vs SNR Slope plot.")
         return
 
-    fig, ax = plt.subplots(figsize=(8, 6), label="latency-variance-vs-snr-slope")
-    ax.scatter(slope_values, variance_values, color='blue', alpha=0.7)
+    fig, ax = plt.subplots(figsize=(8, 6), label="latency-mean-vs-snr-slope")
+    ax.scatter(slope_values, mean_values, color='blue', alpha=0.7)
 
     for i, name in enumerate(names):
-        ax.annotate(name, (slope_values[i], variance_values[i]),
+        ax.annotate(name, (slope_values[i], mean_values[i]),
                     textcoords="offset points", xytext=(0, 10), ha='center')
 
     if len(slope_values) > 1:
-        r, p = pearsonr(slope_values, variance_values)
-        title = f"Latency Variance vs. SNR Slope\n(r={r:.3f}, p={p:.3f})"
+        r, p = pearsonr(slope_values, mean_values)
+        title = f"Latency mean vs. SNR Slope\n(r={r:.3f}, p={p:.3f})"
     else:
-        title = "Latency Variance vs. SNR Slope"
+        title = "Latency mean vs. SNR Slope"
 
     ax.set_title(title)
     ax.set_xlabel("SNR Slope (SNR/Hz)")
-    ax.set_ylabel("Latency Variance log(s²)")
+    ax.set_ylabel("Latency mean s")
     ax.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
