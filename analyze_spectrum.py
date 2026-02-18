@@ -7,43 +7,48 @@ import numpy as np
 from core_types import SubjectPower, Array1D_f64, ConditionProperties
 from core import Study
 
-def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float):
+def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float, show_psd: bool):
 
     print("got snr")
-    title = f"{subject.name()} (Target: {subject.target_frequency()}Hz, Carrier: {subject.carrier_frequency()}Hz)"
-    fig, axes = plt.subplots(2, 1, sharex="all", sharey="none", figsize=(
-        8, 6), label=f"{subject.name()}-spectrum")
-    fig.suptitle(title)
+    title = f"Target: {subject.target_frequency()}Hz, Carrier: {subject.carrier_frequency()}Hz"
 
+    fig, axes = plt.subplots(1+show_psd, 1, sharex="all", sharey="none", figsize=(
+        8, 6), label=f"{subject.name()}-{subject.carrier_frequency()}-spectrum")
+    fig.suptitle(title)
     freqs: Array1D_f64 = subject.frequencies()
     snr_mean, snr_std = subject.as_snr_average() # Float64_F, Float64_F
     # SNR spectrum
+
+    if not show_psd:
+        axes = [axes]
 
     axes[0].plot(freqs, snr_mean)
     axes[0].fill_between(
         freqs, snr_mean - snr_std, snr_mean + snr_std, color="r", alpha=0.1
     )
     axes[0].set(
-        title="SNR spectrum",
+        title="SNR",
         ylabel="SNR [P/N]",
         xlim=[fmin, fmax],
+        ylim=[0, np.max((snr_mean+snr_std)[freqs<=fmax])]
     )
 
-    # Amplitudes spectrum
-    amplitudes_mean, amplitudes_std = subject.as_power_spectrum() # Float64_F, Float64_F
-
-    axes[1].plot(freqs, 20 * np.log10(amplitudes_mean))
-    axes[1].fill_between(
-        freqs, 20 * np.log10(amplitudes_mean - amplitudes_std),
-        20 * np.log10(amplitudes_mean + amplitudes_std),
-        color="r", alpha=0.1
-    )
-    axes[1].set(
-        title="Amplitudes spectrum",
-        xlabel="Frequency [Hz]",
-        ylabel="microV (logscale)",
-        xlim=[fmin, fmax],
-    )
+    if show_psd:
+        # Amplitudes spectrum
+        amplitudes_mean, amplitudes_std = subject.as_power_spectrum() # Float64_F, Float64_F
+        
+        axes[1].plot(freqs, 20 * np.log10(amplitudes_mean))
+        axes[1].fill_between(
+            freqs, 20 * np.log10(amplitudes_mean - amplitudes_std),
+            20 * np.log10(amplitudes_mean + amplitudes_std),
+            color="r", alpha=0.1
+        )
+        axes[1].set(
+            title="Amplitudes spectrum",
+            xlabel="Frequency [Hz]",
+            ylabel="microV (logscale)",
+            xlim=[fmin, fmax],
+        )
 
 
 def _into_channel_average(freqs: Array1D_f64,
@@ -59,7 +64,7 @@ def _into_channel_average(freqs: Array1D_f64,
 def plot_snrs(subject: PowerSpectcraAnalyzable, raw_mne_info: Any):
 
     TOPO_WIDTH = 4
-    TOPO_HEIGHT = 2
+    TOPO_HEIGHT = 1
 
     target_freq = subject.target_frequency()
     carrier_freq = subject.carrier_frequency()
@@ -77,7 +82,7 @@ def plot_snrs(subject: PowerSpectcraAnalyzable, raw_mne_info: Any):
         np.array([t[1] for t in freqs_with_channel_averages]).flatten())
     # plot SNR topography
     fig, axs = plt.subplots(TOPO_HEIGHT, TOPO_WIDTH,  sharex="none",
-                            sharey="none", label=f"{subject.name()}-topomap")
+                            sharey="none", label=f"{subject.name()}-{carrier_freq}-topomap")
     fig.suptitle(f"{subject.name()} Topography (Target: {target_freq}Hz, Carrier: {carrier_freq}Hz)\nMax SNR: {upper_limit:.2f}")
     
     for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatten()):

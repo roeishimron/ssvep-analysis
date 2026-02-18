@@ -9,6 +9,7 @@ from analyze_spectrum import (
     analyze_spectrum, plot_snrs, plot_snr_comparison, CarrierComparisonAnalysis,
     plot_latency_mean_vs_snr_slope
 )
+import matplot2tikz
 
 def main():
     if len(sys.argv) < 2:
@@ -59,7 +60,7 @@ def main():
         fmin = 0.5
         fmax = props.carrier_frequency + 5
         
-        analyze_spectrum(spectrum_view, fmin, fmax)
+        analyze_spectrum(spectrum_view, fmin, fmax, props.carrier_frequency == 10)
 
         # Plot 2: Topography (Spatial distribution of SNR at harmonics)
         # Topomap needs all electrodes
@@ -100,6 +101,21 @@ def main():
         )
     except Exception as e:
         print(f"Could not perform Latency mean vs SNR Slope analysis: {e}")
+
+    print("Saving plots...")
+    os.makedirs("figures", exist_ok=True)
+    for i in plt.get_fignums():
+        fig = plt.figure(i)
+        label = fig.get_label()
+        if not label:
+            label = f"figure_{i}"
+        print(f"Saving {label}...")
+        try:
+            # fig.suptitle("")
+            matplot2tikz.clean_figure(fig)
+            matplot2tikz.save(f"figures/{label}.tex", figure=fig)
+        except Exception as e:
+            print(f"Failed to save {label}: {e}")
 
     print("\nDisplaying plots...")
     plt.show()
