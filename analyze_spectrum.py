@@ -12,43 +12,45 @@ def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float,
     print("got snr")
     title = f"Target: {subject.target_frequency()}Hz, Carrier: {subject.carrier_frequency()}Hz"
 
-    fig, axes = plt.subplots(1+show_psd, 1, sharex="all", sharey="none", figsize=(
-        8, 6), label=f"{subject.name()}-{subject.carrier_frequency()}-spectrum")
-    fig.suptitle(title)
     freqs: Array1D_f64 = subject.frequencies()
-    snr_mean, snr_std = subject.as_snr_average() # Float64_F, Float64_F
-    # SNR spectrum
-
-    if not show_psd:
-        axes = [axes]
-
-    axes[0].plot(freqs, snr_mean)
-    axes[0].fill_between(
-        freqs, snr_mean - snr_std, snr_mean + snr_std, color="r", alpha=0.1
-    )
-    axes[0].set(
-        title="SNR",
-        ylabel="SNR [P/N]",
-        xlim=[fmin, fmax],
-        ylim=[0, np.max((snr_mean+snr_std)[freqs<=fmax])]
-    )
+    snr_mean, snr_std = subject.as_snr_average()
 
     if show_psd:
-        # Amplitudes spectrum
-        amplitudes_mean, amplitudes_std = subject.as_power_spectrum() # Float64_F, Float64_F
-        
-        axes[1].plot(freqs, 20 * np.log10(amplitudes_mean))
-        axes[1].fill_between(
+        # Generate separate amplitudes figure
+        amp_fig, amp_ax = plt.subplots(1, 1, figsize=(8, 3),
+            label=f"{subject.name()}-{subject.carrier_frequency()}-amplitudes")
+        amplitudes_mean, amplitudes_std = subject.as_power_spectrum()
+        amp_ax.plot(freqs, 20 * np.log10(amplitudes_mean))
+        amp_ax.fill_between(
             freqs, 20 * np.log10(amplitudes_mean - amplitudes_std),
             20 * np.log10(amplitudes_mean + amplitudes_std),
             color="r", alpha=0.1
         )
-        axes[1].set(
+        amp_ax.set(
             title="Amplitudes spectrum",
-            xlabel="Frequency [Hz]",
             ylabel="microV (logscale)",
+            xlabel='$\\downarrow$ SNR calculation $\\downarrow$',
             xlim=[fmin, fmax],
         )
+
+    # SNR figure (same for all conditions)
+    fig, ax = plt.subplots(1, 1, figsize=(8, 3),
+        label=f"{subject.name()}-{subject.carrier_frequency()}-spectrum")
+    ax.plot(freqs, snr_mean)
+    ax.fill_between(
+        freqs, snr_mean - snr_std, snr_mean + snr_std, color="r", alpha=0.1
+    )
+    ax.set(
+        title="SNR",
+        ylabel="SNR [P/N]",
+        xlabel="Frequency [Hz]",
+        xlim=[fmin, fmax],
+        ylim=[0, np.max((snr_mean+snr_std)[freqs<=fmax])]
+    )
+    ax.axhline(1, color='red', linestyle='--', alpha=0.5)
+    if show_psd:
+        ax.annotate('SNR=1', xy=(fmin, 1), xytext=(fmin + 0.1, 1.5),
+                    fontsize=11, color='red', alpha=0.7)
 
 
 def _into_channel_average(freqs: Array1D_f64,
