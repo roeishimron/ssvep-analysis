@@ -16,7 +16,7 @@ EXPERIMENT_NAME = "english_vs_mirror"
 BASE_FREQ = 10
 ODDBALL_MODULATION = 2
 
-TARGET_ELECTRODES = np.array(["T5", "T6", "P3", "P4"])
+TARGET_ELECTRODES = np.array(["Pz"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
 AMOUNT_OF_BLOCKS = 5
@@ -34,7 +34,7 @@ BASE_PATH = "/media/lab-server/roei.shimron/ssvep/experiments"
 
 
 def subject_name_into_filename(subject_name: str):
-    return f"""{BASE_PATH}/{EXPERIMENT_NAME}_{BASE_FREQ}hz/{subject_name}_{EXPERIMENT_NAME}_{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s_raw.edf"""
+    return f"{BASE_PATH}/roei_dots_att_black_10hz_15hz_60s_raw.edf"
 
 def parse_file(filename: str) -> Tuple[np.ndarray, Any]:
 
@@ -113,7 +113,9 @@ fmax = BASE_FREQ + 5
 
 #TODO: Name the folder in a "subject-like" manner allowing configuration from the constants
 microvolt_data, raw_info = parse_file(subject_name_into_filename(SUBJECT_NAME))
-microvolt_data, raw_info = parse_folder(f"{BASE_PATH}/all_hebrew_vs_mirror/{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s")#
+microvolt_data = microvolt_data[np.newaxis, ...]
+
+# microvolt_data, raw_info = parse_folder(f"{BASE_PATH}/all_hebrew_vs_mirror/{BASE_FREQ}hz_{ODDBALL_MODULATION}ob_{TRIAL_DURATION}s")#
 
 channels = raw_info["chs"]
 channel_names = [c["ch_name"] for c in channels]
