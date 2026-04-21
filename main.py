@@ -128,6 +128,13 @@ def main():
         if not label:
             label = f"figure_{i}"
         print(f"Saving {label}...")
+        # Topomap figures are included in the LyX doc as topo{carrier}.png;
+        # matplot2tikz struggles with mne topomaps anyway, so emit a PNG too.
+        if "topomap" in label:
+            for carrier in (10, 15, 20):
+                if f"-{carrier}.0-" in label:
+                    fig.savefig(f"figures/topo{carrier}.png", dpi=150, bbox_inches="tight")
+                    break
         try:
             # fig.suptitle("")
             matplot2tikz.clean_figure(fig)

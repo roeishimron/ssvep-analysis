@@ -28,7 +28,7 @@ def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float,
         )
         amp_ax.set(
             title="Amplitudes spectrum",
-            ylabel="microV (logscale)",
+            ylabel=r"Amplitude (dB$\mu$V)",
             xlabel='$\\downarrow$ SNR calculation $\\downarrow$',
             xlim=[fmin, fmax],
         )
@@ -42,7 +42,7 @@ def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float,
     )
     ax.set(
         title="SNR",
-        ylabel="SNR [P/N]",
+        ylabel="SNR",
         xlabel="Frequency [Hz]",
         xlim=[fmin, fmax],
         ylim=[0, np.max((snr_mean+snr_std)[freqs<=fmax])]
@@ -87,13 +87,17 @@ def plot_snrs(subject: PowerSpectcraAnalyzable, raw_mne_info: Any):
                             sharey="none", label=f"{subject.name()}-{carrier_freq}-topomap")
     fig.suptitle(f"{subject.name()} Topography (Target: {target_freq}Hz, Carrier: {carrier_freq}Hz)\nMax SNR: {upper_limit:.2f}")
     
+    im = None
     for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatten()):
 
         print(f"looking at freq {freq:.2f}")
-        ax.set_title(f"SNR at F*{freq/target_freq:.0f} ({freq:.2f})")
+        ax.set_title(f"{freq:.0f} Hz")
 
-        mne.viz.plot_topomap(channel_average, raw_mne_info,
-                             vlim=(1, upper_limit), axes=ax, show=False)
+        im, _ = mne.viz.plot_topomap(channel_average, raw_mne_info,
+                                     vlim=(1, upper_limit), axes=ax, show=False)
+
+    if im is not None:
+        fig.colorbar(im, ax=axs.tolist(), shrink=0.8, label="SNR")
 
 def plot_snr_comparison(study: Study, electrode_names: List[str]):
     labels = []
@@ -117,21 +121,21 @@ def plot_snr_comparison(study: Study, electrode_names: List[str]):
         psd_means.append(psd_m)
         psd_sems.append(psd_s)
         
-        labels.append(f"{props.carrier_frequency}Hz\n({props.target_frequency:.1f}Hz)")
+        labels.append(f"{props.carrier_frequency:.0f} Hz")
         
     fig, ax = plt.subplots(1, 1, figsize=(10, 10), sharex=True, label=f"comparison-{electrode_names}")
     x = np.arange(len(labels))
     
     # SNR Plot
     ax.bar(x, snr_means, yerr=snr_sems, capsize=5, color='skyblue', edgecolor='navy')
-    ax.set_ylabel("SNR [P/N]")
+    ax.set_ylabel("SNR")
     ax.set_title(f"SNR at Target Frequency over {electrode_names}")
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.axhline(1, color='red', linestyle='--', alpha=0.5, label="Noise Floor")
     ax.legend()
     
     plt.xticks(x, labels)
-    fig.suptitle(f"Condition Comparison over {electrode_names}\n(Mean ± SEM across subjects)")
+    fig.suptitle(f"Condition Comparison over {electrode_names}" + "\n" + r"(Mean $\pm$ SEM across subjects)")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
 class CarrierComparisonAnalysis:
@@ -192,7 +196,7 @@ class CarrierComparisonAnalysis:
         for name, snrs in data:
             means = [m for m, _ in snrs]
             sems = [s for _, s in snrs]
-            ax.errorbar(x, means, yerr=sems, marker='o', capsize=3, label=name)
+            ax.errorbar(x, means, yerr=sems, marker='o', capsize=3, label=name.replace("_", " "))
             # Add text labels
             for i, (m, _) in enumerate(snrs):
                 ax.text(i, m, f"{m:.2f}", horizontalalignment='center', verticalalignment='bottom')
@@ -256,7 +260,7 @@ def plot_latency_mean_vs_snr_slope(study: Study,
                 np.asarray(view.calculate_processing_time()).flatten()
             )
 
-        flat = np.concatenate(per_carrier_latencies)
+        flat = np.concatenate(per_carrier_latencies) * 1000
         mean = float(np.mean(flat))
         lat_sem = float(sem(flat)) if flat.size > 1 else 0.0
 
@@ -274,7 +278,7 @@ def plot_latency_mean_vs_snr_slope(study: Study,
                 fmt='o', color='blue', alpha=0.7, capsize=3)
 
     for i, name in enumerate(names):
-        ax.annotate(name, (slope_values[i], mean_values[i]),
+        ax.annotate(name.replace("_", " "), (slope_values[i], mean_values[i]),
                     textcoords="offset points", xytext=(0, 10), ha='center')
 
     if len(slope_values) > 1:
@@ -285,6 +289,6 @@ def plot_latency_mean_vs_snr_slope(study: Study,
 
     ax.set_title(title)
     ax.set_xlabel("SNR Slope (SNR/Hz)")
-    ax.set_ylabel("Latency mean s")
+    ax.set_ylabel("Latency mean (ms)")
     ax.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
