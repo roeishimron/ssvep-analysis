@@ -1,7 +1,7 @@
 from typing import Any, Tuple, List, Iterator
 from matplotlib import pyplot as plt
 import mne
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, sem
 from power_specra_analyzable import PowerSpectcraAnalyzable
 import numpy as np
 from core_types import SubjectPower, Array1D_f64, ConditionProperties
@@ -143,33 +143,34 @@ class CarrierComparisonAnalysis:
         self.carriers = [np.float64(c) for c in carriers]
         self.electrode_names = electrode_names
 
-    def _get_comparison_data(self) -> Iterator[Tuple[str, List[float]]]:
+    def _get_comparison_data(self) -> Iterator[Tuple[str, List[Tuple[float, float]]]]:
         """
         Extracts SNR at carrier frequencies for subjects who participated in all requested conditions.
-        Returns: Iterator of (subject_name, [snr_carrier1, snr_carrier2, ...])
+        Returns: Iterator of (subject_name, [(snr_mean, snr_sem), ...])
         """
         # We assume target frequency is 5Hz for these comparisons as per user's hardcoded update
         props_list = [ConditionProperties(np.float64(5), c) for c in self.carriers]
-        
+
         common_subjects = list(self.study.filter_subjects(set(props_list)))
-        
+
         for subject in common_subjects:
-            subject_snrs = []
+            subject_snrs: List[Tuple[float, float]] = []
             for props in props_list:
                 view = subject[props].restrict_electrodes(self.electrode_names)
-                snr, _ = view.snr_at_target()
-                subject_snrs.append(float(snr))
-            
+                snr, snr_sem = view.snr_at_target()
+                subject_snrs.append((float(snr), float(snr_sem)))
+
             yield (subject.name, subject_snrs)
 
-    def _calculate_slope(self, item: Tuple[str, List[float]]) -> Tuple[str, float]:
+    def _calculate_slope(self, item: Tuple[str, List[Tuple[float, float]]]) -> Tuple[str, float]:
         name, snrs = item
         if len(self.carriers) < 2:
             return (name, 0.0)
-        slope, _ = np.polyfit(self.carriers, snrs, 1)
+        means = [m for m, _ in snrs]
+        slope, _ = np.polyfit(self.carriers, means, 1)
         return (name, float(slope))
 
-    def slopes(self, data: Iterator[Tuple[str, List[float]]]) -> Iterator[Tuple[str, float]]:
+    def slopes(self, data: Iterator[Tuple[str, List[Tuple[float, float]]]]) -> Iterator[Tuple[str, float]]:
         """
         Calculates the slope of SNR vs Carrier Frequency for each subject.
         """
@@ -189,10 +190,12 @@ class CarrierComparisonAnalysis:
         
         x = np.arange(len(self.carriers))
         for name, snrs in data:
-            ax.plot(x, snrs, marker='o', label=name)
+            means = [m for m, _ in snrs]
+            sems = [s for _, s in snrs]
+            ax.errorbar(x, means, yerr=sems, marker='o', capsize=3, label=name)
             # Add text labels
-            for i, snr in enumerate(snrs):
-                ax.text(i, snr, f"{snr:.2f}", horizontalalignment='center', verticalalignment='bottom')
+            for i, (m, _) in enumerate(snrs):
+                ax.text(i, m, f"{m:.2f}", horizontalalignment='center', verticalalignment='bottom')
 
         ax.set_xticks(x)
         ax.set_xticklabels([f"{c} Hz" for c in self.carriers])
@@ -207,12 +210,15 @@ class CarrierComparisonAnalysis:
 
 def plot_latency_mean_vs_snr_slope(study: Study,
                                        carriers: List[float],
-                                       latency_carrier: float,
+                                       latency_carriers: List[float],
                                        target_electrodes: List[str],
                                        carrier_electrodes: List[str]):
     """
     Analyzes and plots the relationship between the mean of neural processing time
     and the SNR slope across different carrier frequencies.
+
+    Latencies are pooled across all `latency_carriers` per subject, giving more
+    samples (and thus a tighter SEM) for the processing-time estimate.
     """
     comparison = CarrierComparisonAnalysis(study, carriers, target_electrodes)
     # Re-use logic for identifying common subjects and their slopes
@@ -224,33 +230,48 @@ def plot_latency_mean_vs_snr_slope(study: Study,
     slopes_dict = dict(comparison.slopes(iter(data)))
     all_subjects = {s.name: s for s in study.subjects()}
 
+    # Require participation in every latency-carrier condition as well —
+    # consistent with Study.filter_subjects usage across the project.
+    latency_requirements = {
+        ConditionProperties(np.float64(5), np.float64(c)) for c in latency_carriers
+    }
+    eligible_names = {s.name for s in study.filter_subjects(latency_requirements)}
+
     names = []
     slope_values = []
     mean_values = []
+    sem_values = []
 
     for name, slope in slopes_dict.items():
+        if name not in eligible_names:
+            continue
         subject = all_subjects[name]
         # Convention: target frequency is 5Hz for these carrier comparisons
-        props = ConditionProperties(np.float64(5), np.float64(latency_carrier))
-
-        try:
+        per_carrier_latencies: List[np.ndarray] = []
+        for lc in latency_carriers:
+            props = ConditionProperties(np.float64(5), np.float64(lc))
             view = subject[props].restrict_electrodes(target_electrodes + carrier_electrodes)
             # calculate_processing_time returns (Subject, Trial)
-            latencies = view.calculate_processing_time()
-            mean = float(np.mean(latencies))
+            per_carrier_latencies.append(
+                np.asarray(view.calculate_processing_time()).flatten()
+            )
 
-            names.append(name)
-            slope_values.append(float(slope))
-            mean_values.append(mean)
-        except KeyError:
-            continue
+        flat = np.concatenate(per_carrier_latencies)
+        mean = float(np.mean(flat))
+        lat_sem = float(sem(flat)) if flat.size > 1 else 0.0
+
+        names.append(name)
+        slope_values.append(float(slope))
+        mean_values.append(mean)
+        sem_values.append(lat_sem)
 
     if not slope_values:
         print("No matching subjects for Latency mean vs SNR Slope plot.")
         return
 
     fig, ax = plt.subplots(figsize=(8, 6), label="latency-mean-vs-snr-slope")
-    ax.scatter(slope_values, mean_values, color='blue', alpha=0.7)
+    ax.errorbar(slope_values, mean_values, yerr=sem_values,
+                fmt='o', color='blue', alpha=0.7, capsize=3)
 
     for i, name in enumerate(names):
         ax.annotate(name, (slope_values[i], mean_values[i]),

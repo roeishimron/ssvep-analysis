@@ -1,0 +1,10 @@
+lyx
+texlive-xetex
+texlive-latex-extra
+texlive-pictures
+texlive-science
+texlive-fonts-extra
+texlive-lang-other
+texlive-bibtex-extra
+biber
+fonts-culmus

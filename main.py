@@ -73,31 +73,49 @@ def main():
     # 5. Subject-wise Carrier Comparison (10Hz vs 15Hz)
     print("\nPlotting Subject-wise SNR Comparison (10Hz vs 15Hz carrier) for T5...")
     try:
-        comparison = CarrierComparisonAnalysis(study, [10, 15, 20], TARGET_ELECTRODES)
+        comparison = CarrierComparisonAnalysis(study, [10, 15], TARGET_ELECTRODES)
         comparison.plot()
     except ValueError as e:
         print(f"Skipping carrier comparison: {e}")
 
-    # 6. Phase Latency Analysis for 10Hz carrier group
-    print("\nAnalyzing Phase Latency for 10Hz carrier group...")
+    # 6. Phase Latency Analysis pooled across carrier groups
+    LATENCY_CARRIERS = [10.0, 15.0, 20.0]
+    print(f"\nAnalyzing Phase Latency pooled across carriers {LATENCY_CARRIERS}Hz...")
 
-    latencies = study.get_condition(ConditionProperties(np.float64(5), np.float64(10))).restrict_electrodes(TARGET_ELECTRODES + V1_ELECTRODES).calculate_processing_time().squeeze() * 1000
-    plt.figure(figsize=(8, 6), label="phase-latency-10hz")
-    plt.hist(latencies, bins=6, edgecolor='black', alpha=0.7)
-    mean_lat = np.mean(latencies)
-    plt.axvline(float(mean_lat), color='red', linestyle='--', label=f'Mean: {mean_lat:.1f}ms')
-    plt.title("Distribution of Processing Time (10Hz Carrier group)")
-    plt.xlabel("Latency (ms)")
-    plt.ylabel("Count (Trials x Subjects)")
-    plt.legend()
-    plt.grid(axis='y', alpha=0.3)
+    # Only include subjects who participated in EVERY latency-carrier condition
+    latency_requirements = {
+        ConditionProperties(np.float64(5), np.float64(lc)) for lc in LATENCY_CARRIERS
+    }
+    common_subjects = list(study.filter_subjects(latency_requirements))
+    print(f"  {len(common_subjects)} subjects common to all latency carriers")
+
+    pooled_latencies = []
+    for subject in common_subjects:
+        for lc in LATENCY_CARRIERS:
+            view = subject[
+                ConditionProperties(np.float64(5), np.float64(lc))
+            ].restrict_electrodes(TARGET_ELECTRODES + V1_ELECTRODES)
+            lat = np.asarray(view.calculate_processing_time()).flatten() * 1000
+            pooled_latencies.append(lat)
+
+    if pooled_latencies:
+        latencies = np.concatenate(pooled_latencies)
+        plt.figure(figsize=(8, 6), label="phase-latency-pooled")
+        plt.hist(latencies, bins=6, edgecolor='black', alpha=0.7)
+        mean_lat = np.mean(latencies)
+        plt.axvline(float(mean_lat), color='red', linestyle='--', label=f'Mean: {mean_lat:.1f}ms')
+        plt.title(f"Distribution of Processing Time (carriers: {LATENCY_CARRIERS}Hz)")
+        plt.xlabel("Latency (ms)")
+        plt.ylabel("Count (Trials x Subjects x Carriers)")
+        plt.legend()
+        plt.grid(axis='y', alpha=0.3)
 
     # 7. Latency mean vs. SNR Slope Analysis
     print("\nAnalyzing Latency mean vs. SNR Slope...")
     try:
-        # Using 10, 15 Hz carriers for slope, and 10Hz for latency baseline
+        # Using 10, 15 Hz carriers for slope, pooled across the same carriers for latency
         plot_latency_mean_vs_snr_slope(
-            study, [10, 15, 20], 10, TARGET_ELECTRODES, V1_ELECTRODES
+            study, [10, 15, 20], LATENCY_CARRIERS, TARGET_ELECTRODES, V1_ELECTRODES
         )
     except Exception as e:
         print(f"Could not perform Latency mean vs SNR Slope analysis: {e}")

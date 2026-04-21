@@ -29,6 +29,11 @@
 			"source": "/media/lab-server",
 			"target": "/media/lab-server",
 			"type": "bind"
+		},
+		{
+			"source": "/home/roeish/workspace/academy/individual-project",
+			"target": "/workspaces/documents",
+			"type": "bind"
 		}
 	],
 	"containerEnv": {
@@ -40,8 +45,7 @@
 			"extensions": [
 				"ms-python.python",
 				"ms-python.autopep8",
-				"Google.gemini-cli-vscode-ide-companion",
-				"ozzafar.debugmcpextension"
+				"Anthropic.claude-code"
 			]
 		}
 	}, // Allowing graphics
