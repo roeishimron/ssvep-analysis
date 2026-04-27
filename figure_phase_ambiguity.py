@@ -150,31 +150,46 @@ def draw_row1(ax) -> None:
     ax.text(398, -2.7, "10 Hz carrier", ha="right", va="top",
             color=C_CARRIER, fontsize=10, weight="bold")
 
-    # Target-peak marker + plumb line on the 5 Hz wave
+    # Discrete-timeline baseline y for plumb-line targeting
     discrete_y = -3.6
     target_peak_y = 1.6 + 1.0  # target baseline = +1.6, amplitude = 1
-    ax.scatter([TARGET_MS], [target_peak_y], s=85, color=C_TARGET,
-               edgecolor="white", linewidth=1.2, zorder=5)
-    ax.plot([TARGET_MS, TARGET_MS], [target_peak_y, discrete_y + 0.05],
-            color=C_TARGET, lw=1.0, linestyle=(0, (3, 3)), alpha=0.9, zorder=3)
-    ax.scatter([TARGET_MS], [discrete_y], s=95, color=C_TARGET,
-               edgecolor="white", linewidth=1.2, zorder=6)
-    ax.text(TARGET_MS, discrete_y - 0.45, "target", ha="center", va="top",
-            color=C_TARGET, fontsize=10, weight="bold")
+    carrier_peak_y = -1.6 + 1.0
 
-    # Carrier-peak markers + plumb lines
-    for tp, name in zip(PHYSICAL_10HZ, ("$T_1$", "$T_2$")):
-        peak_y = -1.6 + 1.0  # carrier amplitude is 1, baseline is -1.6
-        ax.scatter([tp], [peak_y], s=70, color=C_CARRIER,
-                   edgecolor="white", linewidth=1.2, zorder=5)
-        # Dashed plumb line down to the discrete timeline
-        ax.plot([tp, tp], [peak_y, discrete_y + 0.05],
-                color=C_CARRIER, lw=1.0, linestyle=(0, (3, 3)), alpha=0.85, zorder=3)
-        # Discrete-timeline marker
-        ax.scatter([tp], [discrete_y], s=85, color=C_CARRIER,
-                   edgecolor="white", linewidth=1.2, zorder=6)
-        ax.text(tp, discrete_y - 0.45, name, ha="center", va="top",
-                color=C_CARRIER, fontsize=11, weight="bold")
+    def _drop(ax, x, top_y, color, alpha=0.9, zorder=3):
+        ax.plot([x, x], [top_y, discrete_y + 0.05],
+                color=color, lw=1.0, linestyle=(0, (3, 3)), alpha=alpha, zorder=zorder)
+
+    def _label(ax, x, text, color, size=10):
+        ax.text(x, discrete_y - 0.45, text, ha="center", va="top",
+                color=color, fontsize=size, weight="bold")
+
+    # Target peaks — show inside the analytical window (150 ms) and the next
+    # cycle (350 ms) to make periodicity visible.
+    for t_ms, faded in ((TARGET_MS, False), (TARGET_MS + CYCLE_MS, True)):
+        alpha_top = 0.9 if not faded else 0.55
+        ax.scatter([t_ms], [target_peak_y], s=85, color=C_TARGET,
+                   edgecolor="white", linewidth=1.2, zorder=5, alpha=alpha_top)
+        _drop(ax, t_ms, target_peak_y, C_TARGET, alpha=alpha_top)
+        ax.scatter([t_ms], [discrete_y], s=95, color=C_TARGET,
+                   edgecolor="white", linewidth=1.2, zorder=6, alpha=alpha_top)
+        _label(ax, t_ms, "target", C_TARGET)
+
+    # Carrier peaks. Each peak is labelled by its role inside the analytical
+    # window — T_1 at 70 ms (recoloured the same blue as the corresponding
+    # marker in Step 2's 10 Hz panel), T_2 at 170 ms (recoloured orange to
+    # match Step 2). The next cycle's peaks (270 ms, 370 ms) are shown faded
+    # to make the periodicity visible without competing for attention.
+    carrier_palette = (OPTION_COLORS[0], OPTION_COLORS[1])  # T_1 blue, T_2 orange
+    for offset, faded in ((0.0, False), (CYCLE_MS, True)):
+        for tp, name, col in zip(PHYSICAL_10HZ, ("$T_1$", "$T_2$"), carrier_palette):
+            x = tp + offset
+            alpha_top = 0.95 if not faded else 0.50
+            ax.scatter([x], [carrier_peak_y], s=70, color=col,
+                       edgecolor="white", linewidth=1.2, zorder=5, alpha=alpha_top)
+            _drop(ax, x, carrier_peak_y, col, alpha=alpha_top)
+            ax.scatter([x], [discrete_y], s=85, color=col,
+                       edgecolor="white", linewidth=1.2, zorder=6, alpha=alpha_top)
+            _label(ax, x, name, col, size=11)
 
     # Discrete timeline baseline
     ax.plot([0, 400], [discrete_y, discrete_y], color="black", lw=1.0, zorder=4)
@@ -286,12 +301,15 @@ def build_figure() -> plt.Figure:
     ax_10 = fig.add_subplot(gs[1, 0])
     ax_15 = fig.add_subplot(gs[1, 1])
     ax_20 = fig.add_subplot(gs[1, 2])
+    # Same T_i label prefix across all three clocks: T_1…T_N is "the i-th
+    # carrier onset within one analytical cycle" — direct extension of Step 1
+    # to N=3 and N=4. The earlier "C" prefix for 15/20 Hz was an inconsistency.
     draw_clock_panel(ax_10, carriers_ms=PHYSICAL_10HZ,
                      freq_hz=10, label_prefix="T")
     draw_clock_panel(ax_15, carriers_ms=SHIFTED_15HZ,
-                     freq_hz=15, label_prefix="C")
+                     freq_hz=15, label_prefix="T")
     draw_clock_panel(ax_20, carriers_ms=SHIFTED_20HZ,
-                     freq_hz=20, label_prefix="C")
+                     freq_hz=20, label_prefix="T")
     fig.text(0.5, 0.49,
              "Step 2 — Mapping onsets to phase & picking the shortest arc (10 Hz, 15 Hz, 20 Hz)",
              ha="center", va="bottom", fontsize=11, weight="bold")
