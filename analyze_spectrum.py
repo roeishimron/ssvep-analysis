@@ -21,8 +21,11 @@ def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float,
             label=f"{subject.name()}-{subject.carrier_frequency()}-amplitudes")
         amplitudes_mean, amplitudes_std = subject.as_power_spectrum()
         amp_ax.plot(freqs, 20 * np.log10(amplitudes_mean))
+        # Floor the lower edge before log10 so we never feed it 0 or negatives —
+        # protects matplot2tikz's pgfplots output from "Dimension too large".
+        amp_low = np.maximum(amplitudes_mean - amplitudes_std, 1e-6)
         amp_ax.fill_between(
-            freqs, 20 * np.log10(amplitudes_mean - amplitudes_std),
+            freqs, 20 * np.log10(amp_low),
             20 * np.log10(amplitudes_mean + amplitudes_std),
             color="r", alpha=0.1
         )
@@ -37,15 +40,23 @@ def analyze_spectrum(subject: PowerSpectcraAnalyzable, fmin: float, fmax: float,
     fig, ax = plt.subplots(1, 1, figsize=(8, 3),
         label=f"{subject.name()}-{subject.carrier_frequency()}-spectrum")
     ax.plot(freqs, snr_mean)
+    # Clip both edges of the SEM band to the visible y-axis range. With
+    # high-variance subjects there are out-of-range frequency bins where
+    # snr_mean + snr_std reaches the hundreds; matplot2tikz still writes those
+    # raw values into the pgfplots table and xelatex then aborts with
+    # "Dimension too large" when transforming the clipped coordinates.
+    snr_ymax = np.max((snr_mean + snr_std)[freqs <= fmax])
     ax.fill_between(
-        freqs, snr_mean - snr_std, snr_mean + snr_std, color="r", alpha=0.1
+        freqs, np.clip(snr_mean - snr_std, 0, snr_ymax),
+        np.clip(snr_mean + snr_std, 0, snr_ymax),
+        color="r", alpha=0.1
     )
     ax.set(
         title="SNR",
         ylabel="SNR",
         xlabel="Frequency [Hz]",
         xlim=[fmin, fmax],
-        ylim=[0, np.max((snr_mean+snr_std)[freqs<=fmax])]
+        ylim=[0, snr_ymax]
     )
     ax.axhline(1, color='red', linestyle='--', alpha=0.5)
     if show_psd:
@@ -82,11 +93,11 @@ def plot_snrs(subject: PowerSpectcraAnalyzable, raw_mne_info: Any):
 
     upper_limit = np.max(
         np.array([t[1] for t in freqs_with_channel_averages]).flatten())
-    # plot SNR topography
+    # plot SNR topography — figure-level suptitle is omitted on purpose; the
+    # LyX caption describes the figure content already.
     fig, axs = plt.subplots(TOPO_HEIGHT, TOPO_WIDTH,  sharex="none",
                             sharey="none", label=f"{subject.name()}-{carrier_freq}-topomap")
-    fig.suptitle(f"{subject.name()} Topography (Target: {target_freq}Hz, Carrier: {carrier_freq}Hz)\nMax SNR: {upper_limit:.2f}")
-    
+
     im = None
     for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatten()):
 
@@ -97,7 +108,9 @@ def plot_snrs(subject: PowerSpectcraAnalyzable, raw_mne_info: Any):
                                      vlim=(1, upper_limit), axes=ax, show=False)
 
     if im is not None:
-        fig.colorbar(im, ax=axs.tolist(), shrink=0.8, label="SNR")
+        # Anchor the colorbar to the rightmost subplot so it spans only one
+        # head's height, not the whole row.
+        fig.colorbar(im, ax=axs[-1], shrink=1.0, fraction=0.08, pad=0.05, label="SNR")
 
 def plot_snr_comparison(study: Study, electrode_names: List[str]):
     labels = []
@@ -129,14 +142,14 @@ def plot_snr_comparison(study: Study, electrode_names: List[str]):
     # SNR Plot
     ax.bar(x, snr_means, yerr=snr_sems, capsize=5, color='skyblue', edgecolor='navy')
     ax.set_ylabel("SNR")
-    ax.set_title(f"SNR at Target Frequency over {electrode_names}")
+    ax.set_title(f"SNR at Target Frequency over {electrode_names}\n"
+                 r"(Mean $\pm$ SEM across subjects)")
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.axhline(1, color='red', linestyle='--', alpha=0.5, label="Noise Floor")
     ax.legend()
-    
+
     plt.xticks(x, labels)
-    fig.suptitle(f"Condition Comparison over {electrode_names}" + "\n" + r"(Mean $\pm$ SEM across subjects)")
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.tight_layout()
 
 class CarrierComparisonAnalysis:
     """
@@ -277,9 +290,10 @@ def plot_latency_mean_vs_snr_slope(study: Study,
     ax.errorbar(slope_values, mean_values, yerr=sem_values,
                 fmt='o', color='blue', alpha=0.7, capsize=3)
 
-    for i, name in enumerate(names):
-        ax.annotate(name.replace("_", " "), (slope_values[i], mean_values[i]),
-                    textcoords="offset points", xytext=(0, 10), ha='center')
+    # Subject names are deliberately omitted from the exported figure so
+    # participant identifiers don't end up in the PDF. The `names` list is
+    # still computed above for downstream stats / debugging.
+    _ = names
 
     if len(slope_values) > 1:
         r, p = pearsonr(slope_values, mean_values)
