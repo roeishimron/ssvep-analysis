@@ -16,7 +16,7 @@ EXPERIMENT_NAME = "english_vs_mirror"
 BASE_FREQ = 10
 ODDBALL_MODULATION = 2
 
-TARGET_ELECTRODES = np.array(["Pz"])
+TARGET_ELECTRODES = np.array(["Pz", "O1", "O2", "T5", "T6", "P3", "P4"])
 BAD_ELECTRODES = []
 SUM_HARMONICS_UNTIL = 1
 AMOUNT_OF_BLOCKS = 5
@@ -34,7 +34,7 @@ BASE_PATH = "/media/lab-server/roei.shimron/ssvep/experiments"
 
 
 def subject_name_into_filename(subject_name: str):
-    return f"{BASE_PATH}/roei_dots_att_black_10hz_15hz_60s_raw.edf"
+    return f"{BASE_PATH}/roei_dots_random_vs_random_5hz_60s_raw.edf"
 
 def parse_file(filename: str) -> Tuple[np.ndarray, Any]:
 
