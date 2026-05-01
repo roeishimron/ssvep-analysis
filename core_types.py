@@ -20,8 +20,9 @@ SubjectPower = np.ndarray[EF, np.dtype[np.float64]]           # (E, F)
 
 ConditionPhases = np.ndarray[ST, np.dtype[np.complex64]]
 
-Array1D_f64 = np.ndarray[Tuple[int], np.dtype[np.float64]]             
-Array1D_i64 = np.ndarray[Tuple[int], np.dtype[np.int64]]        
+Array1D_f64 = np.ndarray[Tuple[int], np.dtype[np.float64]]
+Array1D_i64 = np.ndarray[Tuple[int], np.dtype[np.int64]]
+Array1D_c64 = np.ndarray[Tuple[int], np.dtype[np.complex64]]
 
 class ConditionProperties(NamedTuple):
     """

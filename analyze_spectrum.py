@@ -257,38 +257,41 @@ def plot_latency_mean_vs_snr_slope(study: Study,
     names = []
     slope_values = []
     mean_values = []
-    sem_values = []
+    sd_values = []
 
     for name, slope in slopes_dict.items():
         if name not in eligible_names:
             continue
         subject = all_subjects[name]
-        # Convention: target frequency is 5Hz for these carrier comparisons
-        per_carrier_latencies: List[np.ndarray] = []
+        # One (mean_ms, sd_ms) per carrier from circular statistics on trial
+        # phases. Pool across carriers: average means; combine SDs in quadrature
+        # then back to a representative SD = √(mean variance).
+        per_carrier_means: List[float] = []
+        per_carrier_sds: List[float] = []
         for lc in latency_carriers:
             props = ConditionProperties(np.float64(5), np.float64(lc))
             view = subject[props].restrict_electrodes(target_electrodes + carrier_electrodes)
-            # calculate_processing_time returns (Subject, Trial)
-            per_carrier_latencies.append(
-                np.asarray(view.calculate_processing_time()).flatten()
-            )
+            mean_ms, sd_ms = view.calculate_processing_time_summary()
+            per_carrier_means.append(float(mean_ms[0]))
+            sd = float(sd_ms[0])
+            per_carrier_sds.append(0.0 if np.isnan(sd) else sd)
 
-        flat = np.concatenate(per_carrier_latencies) * 1000
-        mean = float(np.mean(flat))
-        lat_sem = float(sem(flat)) if flat.size > 1 else 0.0
+        mean = float(np.mean(per_carrier_means))
+        lat_sd = float(np.sqrt(np.mean(np.square(per_carrier_sds))))
 
         names.append(name)
         slope_values.append(float(slope))
         mean_values.append(mean)
-        sem_values.append(lat_sem)
+        sd_values.append(lat_sd)
 
     if not slope_values:
         print("No matching subjects for Latency mean vs SNR Slope plot.")
         return
 
     fig, ax = plt.subplots(figsize=(8, 6), label="latency-mean-vs-snr-slope")
-    ax.errorbar(slope_values, mean_values, yerr=sem_values,
-                fmt='o', color='blue', alpha=0.7, capsize=3)
+    ax.errorbar(slope_values, mean_values, yerr=sd_values,
+                fmt='o', color='blue', alpha=0.7, capsize=3,
+                label='mean ± SD (trial-to-trial)')
 
     # Subject names are deliberately omitted from the exported figure so
     # participant identifiers don't end up in the PDF. The `names` list is

@@ -1,12 +1,12 @@
 import sys
-from typing import List, Dict, Iterator, Set, Tuple, overload
+from typing import List, Dict, Iterator, Set, Tuple, Union, overload
 import numpy as np
 import mne
-from scipy.stats import sem
+from scipy.stats import sem, circmean, circstd
 from power_specra_analyzable import PowerSpectcraAnalyzable
 from core_types import (
-    ConditionProperties, StudyData, SubjectData, StudyPower, 
-    SubjectPower, Array1D_f64, Array1D_i64, ConditionPhases
+    ConditionProperties, StudyData, SubjectData, StudyPower,
+    SubjectPower, Array1D_f64, Array1D_i64, Array1D_c64, ConditionPhases
 )
 
 @overload
@@ -195,43 +195,93 @@ class ConditionView(PowerSpectcraAnalyzable):
     def carrier_frequency(self) -> np.float64:
         return self.blob.props.carrier_frequency
 
-    def calculate_processing_time(self) -> np.ndarray:
+    @staticmethod
+    def _candidate_distances(
+        c_target: Union[ConditionPhases, Array1D_c64],
+        c_carrier: Union[ConditionPhases, Array1D_c64],
+        T_target: np.float64, T_carrier: np.float64,
+    ) -> ConditionPhases:
         """
-        Calculates the time difference (latency) between the carrier frequency response 
-        and the target frequency response.
-        
-        The method accounts for the phase ambiguity arising from different cycle durations.
-        If the carrier frequency is M times the target frequency, there are M possible 
-        time differences within one target cycle. The method selects the one closest 
-        to 50ms (0.05s), based on literature for typical neural latencies.
-        
-        Returns:
-            np.ndarray: A 2D array of shape (Subject, Trial) containing the calculated 
-                        time differences in seconds.
+        Linear part: phasors → array of M complex unit candidate distances along
+        a new last axis, where M = T_target / T_carrier. Each candidate's angle,
+        scaled by T_target / (2π), is a possible latency in seconds. No region
+        selection happens here — that's the lossy step (`_resolve_to_seconds`).
         """
-        f_target = self.target_frequency()
-        f_carrier = self.carrier_frequency()
-        
-        # Get phases and cycle durations
-        c_target, T_target = self.as_phase(f_target)
-        c_carrier, T_carrier = self.as_phase(f_carrier)
-
         assert T_target // T_carrier == T_target / T_carrier
         inflation_ratio = T_target // T_carrier
-        normalized_target, normalized_carrier = c_target / np.abs(c_target), c_carrier / np.abs(c_carrier)
-        adjusted_carrier = normalized_carrier ** (1/inflation_ratio) # its phase should be lowered down
-        regions = np.exp(np.arange(inflation_ratio)*2*np.pi*1j/inflation_ratio)
+        norm_target = c_target / np.abs(c_target)
+        norm_carrier = c_carrier / np.abs(c_carrier)
+        adjusted_carrier = norm_carrier ** (1 / inflation_ratio)
+        regions = np.exp(np.arange(inflation_ratio) * 2 * np.pi * 1j / inflation_ratio)
         possible_carriers = adjusted_carrier[..., np.newaxis] * regions
-        distances = normalized_target[..., np.newaxis] / possible_carriers
+        return (norm_target[..., np.newaxis] / possible_carriers).astype(np.complex64)
 
-        assert T_target > 0.05
-        expected_distance = np.exp((0.05/T_target*2*np.pi)*1j)
+    @staticmethod
+    def _resolve_to_seconds(
+        distances: Union[ConditionPhases, Array1D_c64], T_target: np.float64,
+        expected_s: float = 0.05,
+    ) -> Array1D_f64:
+        """Non-linear (lossy) part: argmin selection by literature anchor."""
+        assert T_target > expected_s
+        expected_distance = np.exp((expected_s / T_target * 2 * np.pi) * 1j)
+        best_idx = np.argmin(
+            np.abs(np.angle(distances / expected_distance)), -1, keepdims=True,
+        )
+        best_dt = np.take_along_axis(distances, best_idx, axis=-1).squeeze(-1)
+        return (np.angle(best_dt) / (2 * np.pi) * T_target).astype(np.float64)
 
-        best_distances = np.argmin(np.abs(np.angle(distances / expected_distance)), -1, keepdims=True)
-        
-        best_dts = np.take_along_axis(distances, best_distances, axis=-1).squeeze(-1)
-        
-        return (np.angle(best_dts))/2/np.pi * T_target
+    def calculate_processing_time(self) -> np.ndarray:
+        """
+        Per-trial latency in seconds, shape (Subject, Trial). Resolves the
+        carrier/target phase ambiguity by selecting the candidate closest to
+        50 ms (literature anchor for early visual cortex).
+        """
+        c_target, T_target = self.as_phase(self.target_frequency())
+        c_carrier, T_carrier = self.as_phase(self.carrier_frequency())
+        distances = self._candidate_distances(c_target, c_carrier, T_target, T_carrier)
+        return self._resolve_to_seconds(distances, T_target)
+
+    def calculate_processing_time_summary(
+        self, r_min: float = 0.3
+    ) -> Tuple[Array1D_f64, Array1D_f64]:
+        """
+        Per-subject circular summary of trial-to-trial latency.
+
+        Returns:
+            mean_ms: shape (S,). Circular-mean latency in ms. The candidate-region
+                     ambiguity is resolved once on the trial-aggregated phase.
+            sd_ms:   shape (S,). Circular SD of carrier-phase jitter in ms:
+                       R = |mean_t exp(i·φ_carrier)|
+                       σ_ms = sqrt(-2 ln R) · 1000 / (2π·f_carrier)
+                     NaN where R < r_min — the small-dispersion approximation
+                     breaks once the phase distribution stops being clustered.
+        """
+        f_carrier = self.carrier_frequency()
+        c_target, T_target = self.as_phase(self.target_frequency())
+        c_carrier, T_carrier = self.as_phase(f_carrier)
+
+        phi_target = np.angle(c_target)
+        phi_carrier = np.angle(c_carrier)
+
+        # Linear: scipy's circular mean across trials, then back to phasors so
+        # the existing _candidate_distances pipeline applies unchanged.
+        mean_phi_target = circmean(phi_target, high=np.pi, low=-np.pi, axis=-1)
+        mean_phi_carrier = circmean(phi_carrier, high=np.pi, low=-np.pi, axis=-1)
+        mean_target_phasor: Array1D_c64 = np.exp(1j * mean_phi_target).astype(np.complex64)
+        mean_carrier_phasor: Array1D_c64 = np.exp(1j * mean_phi_carrier).astype(np.complex64)
+
+        distances = self._candidate_distances(
+            mean_target_phasor, mean_carrier_phasor, T_target, T_carrier,
+        )
+        mean_ms = self._resolve_to_seconds(distances, T_target) * 1000
+
+        # Non-linear: scipy circstd already returns √(−2 ln R) in radians.
+        sd_phi = circstd(phi_carrier, high=np.pi, low=-np.pi, axis=-1)
+        sd_ms = sd_phi * 1000 / (2 * np.pi * f_carrier)
+        # r_min cutoff expressed in σ_φ space: R ≥ r_min ⇔ σ_φ ≤ √(−2 ln r_min).
+        # sd_ms = np.where(sd_phi <= np.sqrt(-2 * np.log(r_min)), sd_ms, np.nan)
+
+        return mean_ms.astype(np.float64), sd_ms.astype(np.float64)
 
     def frequencies(self) -> Array1D_f64:
         sfreq = self.blob.raw_info['sfreq']

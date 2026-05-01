@@ -9,6 +9,9 @@ from analyze_spectrum import (
     analyze_spectrum, plot_snrs, plot_snr_comparison, CarrierComparisonAnalysis,
     plot_latency_mean_vs_snr_slope
 )
+from figure_latency_variance import (
+    per_subject_sds_by_condition, build_figure as build_variance_figure,
+)
 import matplot2tikz
 
 def main():
@@ -79,7 +82,7 @@ def main():
         print(f"Skipping carrier comparison: {e}")
 
     # 6. Phase Latency Analysis pooled across carrier groups
-    LATENCY_CARRIERS = [10.0, 15.0, 20.0]
+    LATENCY_CARRIERS = [10.0]
     print(f"\nAnalyzing Phase Latency pooled across carriers {LATENCY_CARRIERS}Hz...")
 
     # Only include subjects who participated in EVERY latency-carrier condition
@@ -89,24 +92,24 @@ def main():
     common_subjects = list(study.filter_subjects(latency_requirements))
     print(f"  {len(common_subjects)} subjects common to all latency carriers")
 
-    pooled_latencies = []
+    pooled_latencies: list[float] = []
     for subject in common_subjects:
         for lc in LATENCY_CARRIERS:
             view = subject[
                 ConditionProperties(np.float64(5), np.float64(lc))
             ].restrict_electrodes(TARGET_ELECTRODES + V1_ELECTRODES)
-            lat = np.asarray(view.calculate_processing_time()).flatten() * 1000
-            pooled_latencies.append(lat)
+            mean_ms, _ = view.calculate_processing_time_summary()
+            pooled_latencies.append(float(mean_ms[0]))
 
     if pooled_latencies:
-        latencies = np.concatenate(pooled_latencies)
+        latencies = np.asarray(pooled_latencies)
         plt.figure(figsize=(8, 6), label="phase-latency-pooled")
         plt.hist(latencies, bins=6, edgecolor='black', alpha=0.7)
         mean_lat = np.mean(latencies)
         plt.axvline(float(mean_lat), color='red', linestyle='--', label=f'Mean: {mean_lat:.1f}ms')
         plt.title(f"Distribution of Processing Time (carriers: {LATENCY_CARRIERS}Hz)")
         plt.xlabel("Latency (ms)")
-        plt.ylabel("Count (Trials x Subjects x Carriers)")
+        plt.ylabel("Count (Subjects x Carriers)")
         plt.legend()
         plt.grid(axis='y', alpha=0.3)
 
@@ -119,6 +122,12 @@ def main():
         )
     except Exception as e:
         print(f"Could not perform Latency mean vs SNR Slope analysis: {e}")
+
+    # 8. Per-subject circular-SD latency distribution, split by condition
+    print("\nPlotting per-subject latency circular-SD distribution by condition...")
+    by_cond = per_subject_sds_by_condition(study)
+    if by_cond:
+        build_variance_figure(by_cond)
 
     print("Saving plots...")
     os.makedirs("figures", exist_ok=True)
