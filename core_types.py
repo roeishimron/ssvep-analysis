@@ -31,10 +31,21 @@ Array1D_c64 = np.ndarray[Tuple[int], np.dtype[np.complex64]]
 
 class ConditionProperties(NamedTuple):
     """
-    Unique identifier for an experimental condition.
+    Unique identifier for an SSVEP experimental condition.
     """
     target_frequency: np.float64
     carrier_frequency: np.float64
 
     def __repr__(self) -> str:
         return f"ConditionProperties(target={self.target_frequency}Hz, carrier={self.carrier_frequency}Hz)"
+
+
+class AttentionFrequency(NamedTuple):
+    """
+    Unique identifier for a single-frequency attention condition (one
+    flicker frequency per condition, no carrier/target split).
+    """
+    frequency: np.float64
+
+    def __repr__(self) -> str:
+        return f"AttentionFrequency({self.frequency}Hz)"

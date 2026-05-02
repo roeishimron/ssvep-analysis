@@ -12,7 +12,7 @@ Also exports:
   defaults.
 """
 
-from typing import List, Sequence, Tuple
+from typing import Generic, Hashable, List, Sequence, Tuple, TypeVar
 
 import numpy as np
 from scipy.signal.windows import kaiser
@@ -25,8 +25,11 @@ from core_types import (
 from interfaces import Recording, SSVEPRecording
 
 
-class RawRecording:
-    """Concrete Recording backed by an in-memory ndarray.
+K = TypeVar("K", bound=Hashable)
+
+
+class RawRecording(Generic[K]):
+    """Concrete Recording[K] backed by an in-memory ndarray.
 
     Used by the default Experiment.conditions() / aggregate() paths to wrap
     stacked / reshaped raw data without depending on a paradigm-specific
@@ -40,11 +43,13 @@ class RawRecording:
         raw_data: RawStudyData,
         sample_rate: float,
         channel_names: List[str],
+        props: K,
     ) -> None:
         self._name = name
         self._raw_data = raw_data
         self._sample_rate = sample_rate
         self._channel_names = list(channel_names)
+        self._props = props
 
     def name(self) -> str:
         return self._name
@@ -58,7 +63,7 @@ class RawRecording:
     def channel_names(self) -> List[str]:
         return self._channel_names
 
-    def take_channels(self, names: List[str]) -> "RawRecording":
+    def take_channels(self, names: List[str]) -> "RawRecording[K]":
         wanted = set(names)
         indices = [i for i, n in enumerate(self._channel_names) if n in wanted]
         return RawRecording(
@@ -66,14 +71,22 @@ class RawRecording:
             raw_data=self._raw_data[:, :, indices, :],
             sample_rate=self._sample_rate,
             channel_names=[self._channel_names[i] for i in indices],
+            props=self._props,
         )
 
+    def props(self) -> K:
+        return self._props
 
-def combine_subject_recordings(recordings: Sequence[Recording]) -> RawRecording:
+
+def combine_subject_recordings(
+    recordings: Sequence[Recording[K]],
+) -> RawRecording[K]:
     """Stack per-subject recordings (each with S=1) along the subject axis.
 
     Truncates to the smallest common trial count so the stacked array is
-    rectangular — matches the min_trials behavior in core.Study.
+    rectangular — matches the min_trials behavior in core.Study. Propagates
+    props from the first recording (all per-subject recordings for one
+    condition share the same props by construction).
     """
     if not recordings:
         raise ValueError("combine_subject_recordings: empty list")
@@ -87,10 +100,11 @@ def combine_subject_recordings(recordings: Sequence[Recording]) -> RawRecording:
         raw_data=stacked,
         sample_rate=first.sample_rate(),
         channel_names=first.channel_names(),
+        props=first.props(),
     )
 
 
-def flatten_subject_axis(rec: Recording) -> RawRecording:
+def flatten_subject_axis(rec: Recording[K]) -> RawRecording[K]:
     """Reshape (S, T, C, Time) → (1, S*T, C, Time). Subjects become trials."""
     data = rec.raw_data()
     s, t, c, time = data.shape
@@ -100,6 +114,7 @@ def flatten_subject_axis(rec: Recording) -> RawRecording:
         raw_data=flat,
         sample_rate=rec.sample_rate(),
         channel_names=rec.channel_names(),
+        props=rec.props(),
     )
 
 
@@ -261,22 +276,28 @@ class SSVEPAnalysis(Spectral):
         )
         self.expected_latency_s = expected_latency_s
 
+    def _target_frequency(self) -> float:
+        return float(self.rec.props().target_frequency)
+
+    def _carrier_frequency(self) -> float:
+        return float(self.rec.props().carrier_frequency)
+
     def snr_at_target(self) -> Tuple[float, float]:
-        return self.snr_at(self.rec.target_frequency())
+        return self.snr_at(self._target_frequency())
 
     def snr_at_carrier(self) -> Tuple[float, float]:
-        return self.snr_at(self.rec.carrier_frequency())
+        return self.snr_at(self._carrier_frequency())
 
     def power_at_target(self) -> Tuple[float, float]:
-        return self.power_at(self.rec.target_frequency())
+        return self.power_at(self._target_frequency())
 
     def power_at_carrier(self) -> Tuple[float, float]:
-        return self.power_at(self.rec.carrier_frequency())
+        return self.power_at(self._carrier_frequency())
 
     def processing_time_per_trial(self) -> Array1D_f64:
         """Per-trial latency in seconds, shape (S, T)."""
-        c_target, T_target = self.phase_at(self.rec.target_frequency())
-        c_carrier, T_carrier = self.phase_at(self.rec.carrier_frequency())
+        c_target, T_target = self.phase_at(self._target_frequency())
+        c_carrier, T_carrier = self.phase_at(self._carrier_frequency())
         distances = self._candidate_distances(
             c_target, c_carrier, T_target, T_carrier,
         )
@@ -296,8 +317,8 @@ class SSVEPAnalysis(Spectral):
                  not applied here (see core.py history).
         """
         del r_min  # parity with old API; mask intentionally not applied
-        f_carrier = self.rec.carrier_frequency()
-        c_target, T_target = self.phase_at(self.rec.target_frequency())
+        f_carrier = self._carrier_frequency()
+        c_target, T_target = self.phase_at(self._target_frequency())
         c_carrier, T_carrier = self.phase_at(f_carrier)
 
         phi_target = np.angle(c_target)

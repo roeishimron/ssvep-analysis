@@ -1,4 +1,4 @@
-from typing import Iterator, List, Tuple
+from typing import Callable, Hashable, Iterator, List, Tuple, TypeVar
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -6,9 +6,12 @@ from scipy.stats import pearsonr
 
 import mne
 
-from analysis import SSVEPAnalysis
+from analysis import SSVEPAnalysis, Spectral
 from core_types import Array1D_f64, ConditionProperties, SubjectPower
-from interfaces import Experiment, SSVEPRecording, SubjectHandle, TopomapSSVEPRecording
+from interfaces import Experiment, Recording, SSVEPRecording, SubjectHandle, TopomapSSVEPRecording
+
+
+K = TypeVar("K", bound=Hashable)
 
 
 def analyze_spectrum(
@@ -21,7 +24,7 @@ def analyze_spectrum(
     if show_psd:
         amp_fig, amp_ax = plt.subplots(
             1, 1, figsize=(8, 3),
-            label=f"{rec.name()}-{rec.carrier_frequency()}-amplitudes",
+            label=f"{rec.name()}-{rec.props().carrier_frequency}-amplitudes",
         )
         amplitudes_mean, amplitudes_std = analysis.power_spectrum()
         amp_ax.plot(freqs, 20 * np.log10(amplitudes_mean))
@@ -42,7 +45,7 @@ def analyze_spectrum(
 
     fig, ax = plt.subplots(
         1, 1, figsize=(8, 3),
-        label=f"{rec.name()}-{rec.carrier_frequency()}-spectrum",
+        label=f"{rec.name()}-{rec.props().carrier_frequency}-spectrum",
     )
     ax.plot(freqs, snr_mean)
     snr_ymax = np.max((snr_mean + snr_std)[freqs <= fmax])
@@ -78,8 +81,8 @@ def plot_snrs(rec: TopomapSSVEPRecording) -> None:
     TOPO_HEIGHT = 1
 
     analysis = SSVEPAnalysis(rec)
-    target_freq = rec.target_frequency()
-    carrier_freq = rec.carrier_frequency()
+    target_freq = float(rec.props().target_frequency)
+    carrier_freq = float(rec.props().carrier_frequency)
     freqs: Array1D_f64 = analysis.frequencies()
     snr: SubjectPower = analysis.snr_topomap()
 
@@ -304,4 +307,39 @@ def plot_latency_mean_vs_snr_slope(
     ax.set_xlabel("SNR Slope (SNR/Hz)")
     ax.set_ylabel("Latency mean (ms)")
     ax.grid(True, linestyle='--', alpha=0.6)
+    plt.tight_layout()
+
+
+def plot_snr_spectra_overlay(
+    experiment: Experiment[K, Recording[K]],
+    fmin: float,
+    fmax: float,
+    electrodes: List[str],
+    label_func: Callable[[K], str] = str,
+) -> None:
+    """Overlay every condition's group-aggregated SNR spectrum on one axis.
+
+    Paradigm-agnostic — works on any Experiment[K, Recording[K]] (SSVEP,
+    dot-experiments, etc). Each condition gets a colored line plus a shaded
+    SEM band. `label_func` controls the legend entry for each key.
+    """
+    fig, ax = plt.subplots(figsize=(10, 6), label="snr-spectra-overlay")
+
+    for key, view in experiment.conditions().items():
+        spectral = Spectral(view.take_channels(electrodes))
+        freqs = spectral.frequencies()
+        snr_mean, snr_sem = spectral.snr_spectrum()
+        mask = (freqs >= fmin) & (freqs <= fmax)
+        line = ax.plot(freqs[mask], snr_mean[mask], label=label_func(key))[0]
+        lower = np.clip(snr_mean[mask] - snr_sem[mask], 0, None)
+        upper = snr_mean[mask] + snr_sem[mask]
+        ax.fill_between(freqs[mask], lower, upper, alpha=0.2, color=line.get_color())
+
+    ax.axhline(1, color="red", linestyle="--", alpha=0.5, label="noise floor")
+    ax.set_xlabel("Frequency [Hz]")
+    ax.set_ylabel("SNR")
+    ax.set_xlim(fmin, fmax)
+    ax.set_title(f"SNR spectra by condition (electrodes: {electrodes})")
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    ax.legend()
     plt.tight_layout()

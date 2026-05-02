@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from analysis import SSVEPAnalysis
+from core_types import ConditionProperties
 from interfaces import SSVEPRecording
 
 
@@ -27,8 +28,10 @@ def _ssvep_analysis_with_fourier(
     fourier[0, 0, 0, 0, c_idx] = np.exp(1j * carrier_phase_rad)
 
     rec = MagicMock(spec=SSVEPRecording)
-    rec.target_frequency.return_value = target_f
-    rec.carrier_frequency.return_value = carrier_f
+    rec.props.return_value = ConditionProperties(
+        target_frequency=np.float64(target_f),
+        carrier_frequency=np.float64(carrier_f),
+    )
     rec.sample_rate.return_value = 100.0
 
     ana = SSVEPAnalysis.__new__(SSVEPAnalysis)

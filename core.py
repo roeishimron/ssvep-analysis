@@ -1,5 +1,5 @@
 import sys
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Generic, Hashable, Iterator, List, Tuple, TypeVar
 
 import mne
 import numpy as np
@@ -8,23 +8,28 @@ from core_types import (
     Array1D_i64, ConditionProperties, RawStudyData,
 )
 from interfaces import (
-    Experiment, MNERecording, SSVEPRecording, SubjectHandle,
+    Experiment, MNERecording, Recording, SubjectHandle,
 )
 
 
-class ConditionBlob:
+K = TypeVar("K", bound=Hashable)
+
+
+class ConditionBlob(Generic[K]):
     """Heavy-duty container for a single condition's raw time-domain data.
 
-    Storage shape: (Subject, Trial, Channel, Time-samples).
+    Storage shape: (Subject, Trial, Channel, Time-samples). Generic in the
+    condition-key/metadata type K (e.g. ConditionProperties for SSVEP,
+    AttentionFrequency for the dots paradigm).
     """
 
     def __init__(
         self,
         raw_data: RawStudyData,
         sample_rate: float,
-        props: ConditionProperties,
+        props: K,
         raw_info: mne.Info,
-        subjects: List["Subject"],
+        subjects: List["Subject[K]"],
     ) -> None:
         if raw_data.ndim != 4:
             raise ValueError(
@@ -38,7 +43,7 @@ class ConditionBlob:
 
         self.raw_data: RawStudyData = raw_data.astype(np.float64)
         self.sample_rate = sample_rate
-        self.props = props
+        self.props: K = props
         self.raw_info = raw_info
         self.subjects = subjects
 
@@ -59,17 +64,18 @@ class ConditionBlob:
         return self.raw_data.shape[3]
 
 
-class ConditionView:
+class ConditionView(Generic[K]):
     """A configured "lens" into a ConditionBlob.
 
-    Implements Recording, SSVEPRecording, MNERecording (and therefore
-    TopomapSSVEPRecording). Carries no analytical methods — those live in
-    analysis.SSVEPAnalysis (which takes any SSVEPRecording).
+    Implements Recording[K] and MNERecording[K]. Carries no analytical
+    methods — those live in analysis.Spectral / SSVEPAnalysis. SSVEP-specific
+    metadata (target/carrier frequency) is reached via `view.props()`, which
+    returns the K-typed condition key from the underlying blob.
     """
 
     def __init__(
         self,
-        blob: ConditionBlob,
+        blob: ConditionBlob[K],
         subject_idx: int | None = None,
         channel_indices: Array1D_i64 | None = None,
         name: str | None = None,
@@ -92,7 +98,7 @@ class ConditionView:
         else:
             self._name = f"Group({len(blob.subjects)})"
 
-    # --- Recording ---
+    # --- Recording[K] ---
     def name(self) -> str:
         return self._name
 
@@ -110,7 +116,7 @@ class ConditionView:
         all_names = self.blob.raw_info.ch_names
         return [all_names[i] for i in self.channel_indices]
 
-    def take_channels(self, names: List[str]) -> "ConditionView":
+    def take_channels(self, names: List[str]) -> "ConditionView[K]":
         all_names = self.blob.raw_info.ch_names
         wanted = [all_names.index(n) for n in names if n in all_names]
         new_indices: Array1D_i64 = np.intersect1d(
@@ -118,14 +124,10 @@ class ConditionView:
         )
         return ConditionView(self.blob, self.subject_idx, new_indices, name=self._name)
 
-    # --- SSVEPRecording ---
-    def target_frequency(self) -> float:
-        return float(self.blob.props.target_frequency)
+    def props(self) -> K:
+        return self.blob.props
 
-    def carrier_frequency(self) -> float:
-        return float(self.blob.props.carrier_frequency)
-
-    # --- MNERecording ---
+    # --- MNERecording[K] ---
     def mne_info(self) -> mne.Info:
         # Restrict the info to the active channel subset so topomaps line up.
         if len(self.channel_indices) == len(self.blob.raw_info.ch_names):
@@ -138,23 +140,23 @@ class ConditionView:
         )
 
 
-class Subject(SubjectHandle[ConditionProperties, ConditionView]):
-    """A lightweight handle representing a participant in an SSVEP study.
+class Subject(Generic[K], SubjectHandle[K, ConditionView[K]]):
+    """A lightweight handle representing a participant in a study.
 
-    Identity is defined by a unique integer id. Carries no data — the per-condition
-    views live in self._views and are populated by Study at load time. Pinned to
-    ConditionProperties keys, matching Study's enforcement.
+    Identity is defined by a unique integer id. Carries no data — the
+    per-condition views live in self._views and are populated by Study at
+    load time. Generic in the condition-key type K.
     """
 
     def __init__(self, subject_id: int, name: str) -> None:
         self.id = subject_id
         self.name = name
-        self._views: Dict[ConditionProperties, ConditionView] = {}
+        self._views: Dict[K, ConditionView[K]] = {}
 
-    def conditions(self) -> Dict[ConditionProperties, ConditionView]:
+    def conditions(self) -> Dict[K, ConditionView[K]]:
         return self._views
 
-    def __getitem__(self, key: ConditionProperties) -> ConditionView:
+    def __getitem__(self, key: K) -> ConditionView[K]:
         view = self._views.get(key)
         if view is None:
             raise KeyError(
@@ -162,7 +164,7 @@ class Subject(SubjectHandle[ConditionProperties, ConditionView]):
             )
         return view
 
-    def _register_view(self, key: ConditionProperties, view: ConditionView) -> None:
+    def _register_view(self, key: K, view: ConditionView[K]) -> None:
         self._views[key] = view
 
     def __repr__(self) -> str:
@@ -177,30 +179,33 @@ class Subject(SubjectHandle[ConditionProperties, ConditionView]):
         return self.id == other.id
 
 
-class Study(Experiment[ConditionProperties, ConditionView]):
-    """SSVEP-paradigm experiment registry.
+class Study(Generic[K], Experiment[K, ConditionView[K]]):
+    """A paradigm-agnostic experiment registry, generic in the condition key K.
 
-    Inherits Experiment[ConditionView]. Stream is typed as ConditionProperties-keyed
-    — that's the type-level enforcement that every blob in this Study has real
-    SSVEP target/carrier frequencies. Non-SSVEP paradigms (e.g. plain string
-    labels from `compose_folders`) need a different Experiment implementor.
+    Inherits Experiment[K, ConditionView[K]]. Data is pre-stacked into
+    ConditionBlobs at construction; conditions() and aggregate() are
+    overridden for runtime efficiency. Subjects appear in alphabetical order;
+    conditions appear in insertion order (i.e. the order they were first seen
+    in the input stream).
 
-    Overrides conditions() and aggregate() for runtime efficiency: data is
-    pre-stacked into ConditionBlobs at construction and the views are reused.
+    The K type pins which condition-key NamedTuple this study uses
+    (ConditionProperties for SSVEP, AttentionFrequency for dots, etc).
+    Analyses that require a particular K (e.g. SSVEPAnalysis requires
+    K=ConditionProperties) will be type-checked at the call site.
     """
 
     def __init__(
         self,
-        data_stream: Iterator[Tuple[str, ConditionProperties, mne.Info, float, RawStudyData]],
+        data_stream: Iterator[Tuple[str, K, mne.Info, float, RawStudyData]],
         min_trials: int = 3,
     ) -> None:
-        self._subjects_by_name: Dict[str, Subject] = {}
+        self._subjects_by_name: Dict[str, Subject[K]] = {}
         self._next_id = 0
 
         # Buffer raw time-domain data per (condition_key, subject_name).
-        buffer: Dict[ConditionProperties, Dict[str, List[np.ndarray]]] = {}
-        infos: Dict[ConditionProperties, mne.Info] = {}
-        rates: Dict[ConditionProperties, float] = {}
+        buffer: Dict[K, Dict[str, List[np.ndarray]]] = {}
+        infos: Dict[K, mne.Info] = {}
+        rates: Dict[K, float] = {}
 
         for name, props, info, sample_rate, data in data_stream:
             if name not in self._subjects_by_name:
@@ -214,8 +219,8 @@ class Study(Experiment[ConditionProperties, ConditionView]):
 
             buffer[props].setdefault(name, []).append(data)
 
-        self._blobs: Dict[ConditionProperties, ConditionBlob] = {}
-        self._group_views: Dict[ConditionProperties, ConditionView] = {}
+        self._blobs: Dict[K, ConditionBlob[K]] = {}
+        self._group_views: Dict[K, ConditionView[K]] = {}
 
         for props, subject_data_map in buffer.items():
             sorted_names = sorted(subject_data_map.keys())
@@ -249,47 +254,37 @@ class Study(Experiment[ConditionProperties, ConditionView]):
                 view = ConditionView(blob, subject_idx=i)
                 subj._register_view(props, view)
 
-        # Deterministic iteration order:
-        # - subjects sorted alphabetically by name
-        # - conditions sorted by (target_frequency, carrier_frequency)
+        # Subjects sorted alphabetically by name. Conditions keep insertion
+        # order from the input stream (Python dict default).
         self._subjects_by_name = {
             n: self._subjects_by_name[n] for n in sorted(self._subjects_by_name.keys())
         }
 
-        ordered_props = sorted(
-            self._group_views.keys(),
-            key=lambda p: (float(p.target_frequency), float(p.carrier_frequency)),
-        )
-        self._group_views = {p: self._group_views[p] for p in ordered_props}
-        self._blobs = {p: self._blobs[p] for p in ordered_props}
-
-    # --- Experiment ---
-    def subjects(self) -> Dict[str, Subject]:
+    # --- Experiment[K, ConditionView[K]] ---
+    def subjects(self) -> Dict[str, Subject[K]]:
         return self._subjects_by_name
 
-    def conditions(self) -> Dict[ConditionProperties, ConditionView]:
+    def conditions(self) -> Dict[K, ConditionView[K]]:
         return self._group_views
 
     def filter_subjects(
         self, requirements,
-    ) -> Iterator[Subject]:
+    ) -> Iterator[Subject[K]]:
         req_set = set(requirements)
         for subj in self._subjects_by_name.values():
             if req_set.issubset(subj.conditions().keys()):
                 yield subj
 
-    def aggregate(self, key: ConditionProperties) -> ConditionView:
+    def aggregate(self, key: K) -> ConditionView[K]:
         blob = self._blobs.get(key)
         if blob is None:
             raise KeyError(f"Condition {key} not found in study")
 
         s, t, c, time = blob.raw_data.shape
         flat: RawStudyData = blob.raw_data.reshape(1, s * t, c, time).astype(np.float64)
-        new_blob = ConditionBlob(
+        new_blob: ConditionBlob[K] = ConditionBlob(
             flat, blob.sample_rate, blob.props, blob.raw_info,
             [Subject(-1, "Aggregate")],
         )
-        # Stream type guarantees only ConditionProperties keys are stored, so
-        # blob.props is always a real ConditionProperties (no placeholder branch).
-        label = f"Aggregate({blob.props.target_frequency}Hz)"
+        label = f"Aggregate({blob.props})"
         return ConditionView(new_blob, name=label)

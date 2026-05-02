@@ -6,14 +6,17 @@ import numpy as np
 import pytest
 
 from analysis import SSVEPAnalysis
+from core_types import ConditionProperties
 from interfaces import Recording, SSVEPRecording, SSVEPRecording as _SR
 
 
 def _ssvep_analysis_with_fourier(props_target, props_carrier, fourier_5d, freqs_array):
     """Construct an SSVEPAnalysis with pre-computed FFT data, bypassing the FFT step."""
     rec = MagicMock(spec=SSVEPRecording)
-    rec.target_frequency.return_value = props_target
-    rec.carrier_frequency.return_value = props_carrier
+    rec.props.return_value = ConditionProperties(
+        target_frequency=np.float64(props_target),
+        carrier_frequency=np.float64(props_carrier),
+    )
     rec.sample_rate.return_value = 100.0
     rec.name.return_value = "mock"
 

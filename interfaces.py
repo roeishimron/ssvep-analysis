@@ -1,21 +1,21 @@
 """Protocol definitions for multi-paradigm experiment analysis.
 
 Three layers:
-- Recording / SSVEPRecording / MNERecording / TopomapSSVEPRecording: a single
-  observation's raw-data accessors. Implementors expose data; analysis classes
-  in analysis.py do the FFT/SNR/phase work.
-- SubjectHandle / Experiment: registry layer keyed by any Hashable.
+- Recording[K] / MNERecording[K]: a single observation's raw-data accessors,
+  generic in the condition-key/metadata type K. SSVEPRecording and
+  TopomapSSVEPRecording are type aliases for the K=ConditionProperties cases.
+- SubjectHandle[K, V] / Experiment[K, V]: registry layer keyed by K.
 
 Implementors only have to supply the few primitives marked as required; every
-other method is default-implemented on the Protocol body and may be overridden
-for runtime efficiency (see Study in core.py).
+other method on Experiment is default-implemented on the Protocol body and may
+be overridden for runtime efficiency (see Study in core.py).
 
 Generic parameters:
-  K — the condition-key type (bound to Hashable). Each implementor pins K to
-  whatever it actually stores (Study uses ConditionProperties; a string-keyed
-  Experiment would use str).
+  K — the condition-key/metadata type (bound to Hashable). Each implementor
+  pins K to whatever it actually stores (Study uses ConditionProperties or
+  AttentionFrequency depending on the paradigm).
   V — the Recording subtype the registry yields. Covariant so a `Dict[K,
-  ConditionView]` can satisfy `Mapping[K, SSVEPRecording]`.
+  ConditionView[K]]` can satisfy `Mapping[K, Recording[K]]`.
 """
 
 from typing import (
@@ -24,49 +24,53 @@ from typing import (
 
 import mne
 
-from core_types import RawStudyData
+from core_types import ConditionProperties, RawStudyData
+
+
+# K_co (covariant) is used in the Recording / MNERecording protocols, where K
+# only ever appears in return positions (props() -> K, take_channels() ->
+# Recording[K]). K (invariant) is used as the dict key in SubjectHandle /
+# Experiment, where invariance is required for Mapping-typed APIs.
+K_co = TypeVar("K_co", bound=Hashable, covariant=True)
+K = TypeVar("K", bound=Hashable)
 
 
 @runtime_checkable
-class Recording(Protocol):
+class Recording(Protocol[K_co]):
     """Paradigm-agnostic, MNE-free raw-data accessor for one observation.
 
     raw_data is shape (Subject, Trial, Channel, Time). Single-subject views
     have S=1; group views stack subjects along axis 0.
+
+    `props()` exposes the condition-key/metadata associated with this
+    recording. The key type K is what differentiates paradigms — e.g.
+    ConditionProperties for SSVEP, AttentionFrequency for the dots paradigm.
     """
 
     def name(self) -> str: ...
     def raw_data(self) -> RawStudyData: ...
     def sample_rate(self) -> float: ...
     def channel_names(self) -> List[str]: ...
-    def take_channels(self, names: List[str]) -> "Recording": ...
+    def take_channels(self, names: List[str]) -> "Recording[K_co]": ...
+    def props(self) -> K_co: ...
 
 
 @runtime_checkable
-class SSVEPRecording(Recording, Protocol):
-    """Recording that knows its SSVEP target and carrier frequencies."""
-
-    def target_frequency(self) -> float: ...
-    def carrier_frequency(self) -> float: ...
-    def take_channels(self, names: List[str]) -> "SSVEPRecording": ...
-
-
-@runtime_checkable
-class MNERecording(Recording, Protocol):
+class MNERecording(Recording[K_co], Protocol[K_co]):
     """Recording with MNE channel-layout info, needed for topomaps."""
 
     def mne_info(self) -> mne.Info: ...
-    def take_channels(self, names: List[str]) -> "MNERecording": ...
+    def take_channels(self, names: List[str]) -> "MNERecording[K_co]": ...
 
 
-@runtime_checkable
-class TopomapSSVEPRecording(SSVEPRecording, MNERecording, Protocol):
-    """Combined contract required by plot_snrs (SSVEP + MNE topomap layout)."""
+# Type aliases for the SSVEP paradigm — pin K to ConditionProperties.
+# Analyses that need target/carrier frequencies should use these aliases in
+# their signatures; the type system will then reject views whose K is not
+# ConditionProperties (e.g. AttentionFrequency from the dots paradigm).
+SSVEPRecording = Recording[ConditionProperties]
+TopomapSSVEPRecording = MNERecording[ConditionProperties]
 
-    def take_channels(self, names: List[str]) -> "TopomapSSVEPRecording": ...
 
-
-K = TypeVar("K", bound=Hashable)
 V = TypeVar("V", bound=Recording, covariant=True)
 
 
