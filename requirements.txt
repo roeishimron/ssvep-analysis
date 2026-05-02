@@ -6,3 +6,4 @@ joblib
 pyside6
 matplot2tikz
 pytest
+pyright
