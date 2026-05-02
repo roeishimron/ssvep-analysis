@@ -2,6 +2,7 @@ import sys
 import os
 import matplotlib.pyplot as plt
 import numpy as np
+from analysis import SSVEPAnalysis
 from core import Study
 from core_types import ConditionProperties
 from loader import StudyLoader
@@ -31,9 +32,8 @@ def main():
     loader = StudyLoader()
     study = Study(loader.load(root_dir))
 
-    # 2. Identify all conditions present in the study
-    # We can get these from the blobs
-    conditions = list(study._blobs.keys())
+    # 2. Identify all conditions present in the study.
+    conditions = list(study.conditions().keys())
     if not conditions:
         print("No conditions found in the provided folder.")
         sys.exit(0)
@@ -49,25 +49,24 @@ def main():
     for props in conditions:
         print(f"\nAnalyzing condition: {props}")
         
-        # Get the aggregate view (average trials, promote subjects to trials)
+        # Get the aggregate view (subjects flattened into trials)
         try:
-            view = study.get_condition(props)
+            view = study.aggregate(props)
         except KeyError:
             continue
 
         # Plot 1: Spectrum (SNR and Amplitudes)
         # Restrict to target electrodes for the spectrum plots to reduce noise
-        spectrum_view = view.restrict_electrodes(TARGET_ELECTRODES)
-        
-        # Determine frequency range for plotting: [0.5, target*2 + 5]
+        spectrum_view = view.take_channels(TARGET_ELECTRODES)
+
+        # Determine frequency range for plotting
         fmin = 0.5
         fmax = props.carrier_frequency + 5
-        
+
         analyze_spectrum(spectrum_view, fmin, fmax, props.carrier_frequency == 10)
 
         # Plot 2: Topography (Spatial distribution of SNR at harmonics)
-        # Topomap needs all electrodes
-        plot_snrs(view, view.blob.raw_info)
+        plot_snrs(view)
 
     # 4. Global Analysis: SNR Comparison across conditions
     print("\nPlotting SNR comparison across conditions for T5...")
@@ -97,8 +96,8 @@ def main():
         for lc in LATENCY_CARRIERS:
             view = subject[
                 ConditionProperties(np.float64(5), np.float64(lc))
-            ].restrict_electrodes(TARGET_ELECTRODES + V1_ELECTRODES)
-            mean_ms, _ = view.calculate_processing_time_summary()
+            ].take_channels(TARGET_ELECTRODES + V1_ELECTRODES)
+            mean_ms, _ = SSVEPAnalysis(view).processing_time_summary()
             pooled_latencies.append(float(mean_ms[0]))
 
     if pooled_latencies:

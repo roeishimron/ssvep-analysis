@@ -1,88 +1,77 @@
+"""Tests for SSVEPAnalysis.processing_time_per_trial — phase ambiguity resolution."""
 import unittest
-import numpy as np
 from unittest.mock import MagicMock
-from core import ConditionView, ConditionBlob, Subject
-from core_types import ConditionProperties
+
+import numpy as np
+
+from analysis import SSVEPAnalysis
+from interfaces import SSVEPRecording
+
+
+def _ssvep_analysis_with_fourier(
+    target_f, carrier_f, target_phase_rad, carrier_phase_rad,
+):
+    """Build a SSVEPAnalysis whose phase_at(...) returns predetermined phasors.
+
+    Bypasses the FFT pipeline to test only the candidate_distances + resolve_to_seconds
+    composition that processing_time_per_trial wraps.
+    """
+    n_freqs = 30
+    freqs_array = np.linspace(1, 30, n_freqs).astype(np.float64)
+    t_idx = int(np.argmin(np.abs(freqs_array - target_f)))
+    c_idx = int(np.argmin(np.abs(freqs_array - carrier_f)))
+
+    # (S=1, T=1, C=1, W=1, F=30) — single phasor at each frequency bin.
+    fourier = np.zeros((1, 1, 1, 1, n_freqs), dtype=np.complex64)
+    fourier[0, 0, 0, 0, t_idx] = np.exp(1j * target_phase_rad)
+    fourier[0, 0, 0, 0, c_idx] = np.exp(1j * carrier_phase_rad)
+
+    rec = MagicMock(spec=SSVEPRecording)
+    rec.target_frequency.return_value = target_f
+    rec.carrier_frequency.return_value = carrier_f
+    rec.sample_rate.return_value = 100.0
+
+    ana = SSVEPAnalysis.__new__(SSVEPAnalysis)
+    ana.rec = rec
+    ana.window_duration_s = 1.0
+    ana.n_neighbors = 3
+    ana.n_skip = 1
+    ana._window_size = 100
+    ana._fourier_cache = fourier
+    ana.expected_latency_s = 0.05
+    ana.frequencies = lambda: freqs_array
+    return ana
+
 
 class TestProcessingTime(unittest.TestCase):
-    def setUp(self):
-        self.n_subjects = 1
-        self.n_trials = 1
-        self.n_electrodes = 1
-        self.n_windows = 1
-        self.n_freqs = 30
-        self.freqs_array = np.linspace(1, 30, self.n_freqs)
-        
-    def _create_mock_view(self, target_f, carrier_f, target_phase_rad, carrier_phase_rad):
-        # target_f and carrier_f should be in the freqs_array
-        t_idx = np.argmin(np.abs(self.freqs_array - target_f))
-        c_idx = np.argmin(np.abs(self.freqs_array - carrier_f))
-        
-        data = np.zeros((self.n_subjects, self.n_trials, self.n_electrodes, self.n_windows, self.n_freqs), dtype=np.complex64)
-        
-        # Set phases
-        data[0, 0, 0, 0, t_idx] = np.exp(1j * target_phase_rad)
-        data[0, 0, 0, 0, c_idx] = np.exp(1j * carrier_phase_rad)
-        
-        mock_blob = MagicMock(spec=ConditionBlob)
-        mock_blob.data = data
-        mock_blob.subjects = [Subject(0, "S1")]
-        mock_blob.props = ConditionProperties(target_frequency=np.float64(target_f), carrier_frequency=np.float64(carrier_f))
-        mock_blob.n_electrodes = self.n_electrodes
-        mock_blob.n_trials = self.n_trials
-        mock_blob.n_subjects = self.n_subjects
-        
-        view = ConditionView(mock_blob)
-        view.frequencies = MagicMock(return_value=self.freqs_array)
-        # Mock _get_psd to avoid SNR calculation issues
-        view._get_psd = MagicMock(return_value=np.abs(data.mean(axis=-2))**2)
-        
-        return view
-
     def test_processing_time_2to1_ratio(self):
-        # Target: 5Hz (T=200ms), Carrier: 10Hz (T=100ms)
-        # 50ms is the heuristic.
-        
-        # Case 1: t_target=0, t_carrier=60ms. 
-        # diff = 0 - 60 = -60 = 140ms.
-        # Candidates: 140, 140+100=240=40.
-        # 40ms is closer to 50ms.
-        view = self._create_mock_view(5.0, 10.0, 0, 1.2 * np.pi)
-        latencies = view.calculate_processing_time()
-        # Expect 0.04
+        # Target 5Hz (T=200ms), carrier 10Hz (T=100ms). 50ms is the heuristic.
+
+        # Case 1: t_target=0, t_carrier=60ms. diff=140ms. Candidates: 140, 40. Pick 40.
+        ana = _ssvep_analysis_with_fourier(5.0, 10.0, 0, 1.2 * np.pi)
+        latencies = ana.processing_time_per_trial()
         self.assertAlmostEqual(latencies[0, 0], 0.04, places=5)
-        
-        # Case 2: t_target=0, t_carrier=40ms.
-        # diff = 0 - 40 = -40 = 160ms.
-        # Candidates: 160, 60.
-        # 60ms is closer to 50ms.
-        view = self._create_mock_view(5.0, 10.0, 0, 0.8 * np.pi)
-        latencies = view.calculate_processing_time()
+
+        # Case 2: t_target=0, t_carrier=40ms. diff=160ms. Candidates: 160, 60. Pick 60.
+        ana = _ssvep_analysis_with_fourier(5.0, 10.0, 0, 0.8 * np.pi)
+        latencies = ana.processing_time_per_trial()
         self.assertAlmostEqual(latencies[0, 0], 0.06, places=5)
 
     def test_processing_time_3to1_ratio(self):
-        # Target: 5Hz (T=200ms), Carrier: 15Hz (T=66.6ms)
-        # n_cycles = 3.
-        # carrier_t = 10ms. target_t = 0.
-        # diff = -10. Candidates: -10, 56.6, 123.3.
-        # 56.6 is closest to 50.
-        
-        carrier_phase = (0.01 / (1/15.0)) * 2 * np.pi
-        view = self._create_mock_view(5.0, 15.0, 0, carrier_phase)
-        latencies = view.calculate_processing_time()
-        # 56.6ms is T_carrier - 10ms.
-        self.assertAlmostEqual(latencies[0, 0], 1/15.0 - 0.01, places=5)
+        # Target 5Hz, carrier 15Hz. n_cycles=3. carrier_t=10ms.
+        # Candidates: -10, 56.6, 123.3. Pick 56.6 (closest to 50).
+        carrier_phase = (0.01 / (1 / 15.0)) * 2 * np.pi
+        ana = _ssvep_analysis_with_fourier(5.0, 15.0, 0, carrier_phase)
+        latencies = ana.processing_time_per_trial()
+        self.assertAlmostEqual(latencies[0, 0], 1 / 15.0 - 0.01, places=5)
 
     def test_circularity_near_boundary(self):
-        # Target 5Hz (T=200ms), Carrier 10Hz (T=100ms)
-        # t_target = 190ms. t_carrier = 40ms.
-        # diff = 190 - 40 = 150ms.
-        # Candidates: 150, 250%200 = 50.
-        # 50ms is exactly target latency.
-        
-        view = self._create_mock_view(5.0, 10.0, 1.9 * np.pi, 0.8 * np.pi)
-        latencies = view.calculate_processing_time()
+        # Target 5Hz, carrier 10Hz. t_target=190ms, t_carrier=40ms. diff=150ms.
+        # Candidates: 150, 50. Pick 50.
+        ana = _ssvep_analysis_with_fourier(5.0, 10.0, 1.9 * np.pi, 0.8 * np.pi)
+        latencies = ana.processing_time_per_trial()
         self.assertAlmostEqual(latencies[0, 0], 0.05, places=5)
+
 
 if __name__ == '__main__':
     unittest.main()

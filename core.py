@@ -1,436 +1,295 @@
 import sys
-from typing import List, Dict, Iterator, Set, Tuple, Union, overload
-import numpy as np
+from typing import Dict, Iterator, List, Tuple
+
 import mne
-from scipy.stats import sem, circmean, circstd
-from power_specra_analyzable import PowerSpectcraAnalyzable
+import numpy as np
+
 from core_types import (
-    ConditionProperties, StudyData, SubjectData, StudyPower,
-    SubjectPower, Array1D_f64, Array1D_i64, Array1D_c64, ConditionPhases
+    Array1D_i64, ConditionProperties, RawStudyData,
+)
+from interfaces import (
+    Experiment, MNERecording, SSVEPRecording, SubjectHandle,
 )
 
-@overload
-def into_SNR(psd: StudyPower, n_neighbors: int = 3, n_skip: int = 1) -> StudyPower: ...
-
-@overload
-def into_SNR(psd: SubjectPower, n_neighbors: int = 3, n_skip: int = 1) -> SubjectPower: ...
-
-def into_SNR(psd: np.ndarray, n_neighbors: int = 3, n_skip: int = 1) -> np.ndarray:
-    """
-    Calculates SNR from power spectrum using neighbor-based noise estimation.
-    """
-    kernel = np.concatenate((np.ones(n_neighbors), np.zeros(2*n_skip+1), np.ones(n_neighbors)))
-    kernel /= kernel.sum()
-    
-    mean_noise = np.apply_along_axis(
-        lambda x: np.convolve(x, kernel, mode="valid"), axis=-1, arr=psd
-    )
-    
-    edge_width = n_neighbors + n_skip
-    pad_width = [(0, 0)] * (mean_noise.ndim - 1) + [(edge_width, edge_width)]
-    mean_noise = np.pad(mean_noise, pad_width=pad_width, constant_values=np.inf)
-    
-    return psd / mean_noise
 
 class ConditionBlob:
+    """Heavy-duty container for a single condition's raw time-domain data.
+
+    Storage shape: (Subject, Trial, Channel, Time-samples).
     """
-    Heavy-duty container for a single experimental condition's data.
-    """
+
     def __init__(
         self,
-        data: StudyData,
+        raw_data: RawStudyData,
+        sample_rate: float,
         props: ConditionProperties,
         raw_info: mne.Info,
-        subjects: List['Subject']
-    ):
-        if data.ndim != 5:
-            raise ValueError(f"Data must be 5D (Subject, Trial, Electrode, Window, Frequency), got {data.ndim}D")
-        
-        if data.shape[0] != len(subjects):
-            raise ValueError(f"Subject dimension size ({data.shape[0]}) must match number of subjects ({len(subjects)})")
-            
-        self.data: StudyData = data.astype(np.complex64)
+        subjects: List["Subject"],
+    ) -> None:
+        if raw_data.ndim != 4:
+            raise ValueError(
+                f"raw_data must be 4D (Subject, Trial, Channel, Time), got {raw_data.ndim}D"
+            )
+        if raw_data.shape[0] != len(subjects):
+            raise ValueError(
+                f"Subject dimension size ({raw_data.shape[0]}) must match "
+                f"number of subjects ({len(subjects)})"
+            )
+
+        self.raw_data: RawStudyData = raw_data.astype(np.float64)
+        self.sample_rate = sample_rate
         self.props = props
         self.raw_info = raw_info
         self.subjects = subjects
 
     @property
     def n_subjects(self) -> int:
-        return self.data.shape[0]
+        return self.raw_data.shape[0]
 
     @property
     def n_trials(self) -> int:
-        return self.data.shape[1]
+        return self.raw_data.shape[1]
 
     @property
-    def n_electrodes(self) -> int:
-        return self.data.shape[2]
+    def n_channels(self) -> int:
+        return self.raw_data.shape[2]
 
     @property
-    def n_windows(self) -> int:
-        return self.data.shape[3]
+    def n_time(self) -> int:
+        return self.raw_data.shape[3]
 
-    @property
-    def n_frequencies(self) -> int:
-        return self.data.shape[4]
 
-class ConditionView(PowerSpectcraAnalyzable):
+class ConditionView:
+    """A configured "lens" into a ConditionBlob.
+
+    Implements Recording, SSVEPRecording, MNERecording (and therefore
+    TopomapSSVEPRecording). Carries no analytical methods — those live in
+    analysis.SSVEPAnalysis (which takes any SSVEPRecording).
     """
-    A configured "lens" into a ConditionBlob.
-    Implements PowerSpectcraAnalyzable.
-    """
+
     def __init__(
         self,
         blob: ConditionBlob,
         subject_idx: int | None = None,
-        electrode_indices: Array1D_i64 | None = None,
-        name: str | None = None
-    ):
+        channel_indices: Array1D_i64 | None = None,
+        name: str | None = None,
+    ) -> None:
         self.blob = blob
         self.subject_idx = subject_idx
-        if electrode_indices is None:
-            self.electrode_indices: Array1D_i64 = np.arange(blob.n_electrodes, dtype=np.int64)
+        if channel_indices is None:
+            self.channel_indices: Array1D_i64 = np.arange(
+                blob.n_channels, dtype=np.int64,
+            )
         else:
-            self.electrode_indices: Array1D_i64 = electrode_indices
-        
+            self.channel_indices = channel_indices
+
         if name:
             self._name = name
         elif subject_idx is not None:
             self._name = blob.subjects[subject_idx].name
+        elif len(blob.subjects) == 1:
+            self._name = blob.subjects[0].name
         else:
-            # All subjects
-            if len(blob.subjects) == 1:
-                self._name = blob.subjects[0].name
-            else:
-                self._name = f"Group({len(blob.subjects)})"
+            self._name = f"Group({len(blob.subjects)})"
 
-    @property
-    def data(self) -> StudyData:
-        # Always returns 5D: (Subject, Trial, Electrode, Window, Frequency)
+    # --- Recording ---
+    def name(self) -> str:
+        return self._name
+
+    def raw_data(self) -> RawStudyData:
         if self.subject_idx is None:
-            return self.blob.data[:, :, self.electrode_indices, :, :]
-        # indexing with [idx:idx+1] keeps the dimension
-        return self.blob.data[self.subject_idx : self.subject_idx + 1, :, self.electrode_indices, :, :]
+            return self.blob.raw_data[:, :, self.channel_indices, :]
+        return self.blob.raw_data[
+            self.subject_idx : self.subject_idx + 1, :, self.channel_indices, :,
+        ]
 
-    def _get_psd(self) -> StudyPower:
-        """
-        Calculates PSD using coherent averaging only over windows:
-        ALWAYS first average the fourier components over windows and only then take their absolute value^2.
-        Returns: (Subject, Trial, Electrode, Frequency)
-        """
-        # data: (S, T, E, W, F)
-        # Average over Windows axis (-2) ONLY
-        avg_window = np.mean(self.data, axis=-2)
-        return np.abs(avg_window)**2
+    def sample_rate(self) -> float:
+        return self.blob.sample_rate
 
-    def restrict_electrodes(self, names: List[str]) -> 'ConditionView':
+    def channel_names(self) -> List[str]:
         all_names = self.blob.raw_info.ch_names
-        indices = np.array([all_names.index(n) for n in names if n in all_names], dtype=np.int64)
-        new_indices: Array1D_i64 = np.intersect1d(self.electrode_indices, indices)
+        return [all_names[i] for i in self.channel_indices]
+
+    def take_channels(self, names: List[str]) -> "ConditionView":
+        all_names = self.blob.raw_info.ch_names
+        wanted = [all_names.index(n) for n in names if n in all_names]
+        new_indices: Array1D_i64 = np.intersect1d(
+            self.channel_indices, np.array(wanted, dtype=np.int64),
+        )
         return ConditionView(self.blob, self.subject_idx, new_indices, name=self._name)
 
-    def as_power_spectrum(self) -> Tuple[Array1D_f64, Array1D_f64]:
-        # Returns (average, sem) across Subject, Trial and Electrode dimensions
-        ps: StudyPower = self._get_psd() 
-        
-        if ps.shape[0] > 1:
-            # SEM across subjects: average over trials/electrodes per subject, then SEM over subjects
-            subject_means = np.mean(ps, axis=(1, 2)) # (S, F)
-            return np.mean(subject_means, axis=0), sem(subject_means, axis=0)
-        else:
-            # Flatten all non-frequency dimensions: (S, T, E, F) -> (-1, F)
-            flat_ps = ps.reshape(-1, ps.shape[-1])
-            return np.average(flat_ps, axis=0), sem(flat_ps, axis=0)
+    # --- SSVEPRecording ---
+    def target_frequency(self) -> float:
+        return float(self.blob.props.target_frequency)
 
-    def as_snr(self) -> SubjectPower:
-        # returns the average snr across subjects and trials, but keeps Electrode dimension (spatial)
-        ps: StudyPower = self._get_psd()
-        snrs: StudyPower = into_SNR(ps)
-        # Average over Subject (0) and Trial (1) dimensions
-        return np.average(snrs, axis=(0, 1))
+    def carrier_frequency(self) -> float:
+        return float(self.blob.props.carrier_frequency)
 
-    def as_snr_average(self) -> Tuple[Array1D_f64, Array1D_f64]:
-        # returns (average, sem) at each frequency across Subjects, Trials and Electrodes
-        ps: StudyPower = self._get_psd()
-        snrs: StudyPower = into_SNR(ps)
-        
-        if snrs.shape[0] > 1:
-            # SEM across subjects: average over trials/electrodes per subject, then SEM over subjects
-            subject_means = np.mean(snrs, axis=(1, 2)) # (S, F)
-            print(f"taking the sem of {subject_means.shape[0]} subjects")
-            return np.mean(subject_means, axis=0), sem(subject_means, axis=0)
-        else:
-            flat_snrs = snrs.reshape(-1, snrs.shape[-1])
-            return np.average(flat_snrs, axis=0), sem(flat_snrs, axis=0)
-        
-    def as_phase(self, frequency: np.float64) -> Tuple[ConditionPhases, np.float64]:
-        """Returns the phases of the subjects at each trial coupeled with the cycle duration (seconds)"""
-        frequency_index = np.argmin(np.abs(self.frequencies() - frequency))
-        
-        # Calculate SNR on the full PSD first to ensure correct neighbor convolution
-        psd_all = self._get_psd() # (S, T, E, F)
-        snrs_all = into_SNR(psd_all) # (S, T, E, F)
-        
-        # Select target frequency SNR and average over trials
-        snrs_target = snrs_all[..., frequency_index] # (S, T, E)
-        snrs_avg_trial = snrs_target.mean(axis=1) # (S, E)
-        
-        target_electrode_per_subject = np.argmax(snrs_avg_trial, axis=-1) # (S,)
-        
-        over_maximum_electrode = self.data[np.arange(self.data.shape[0]),:, target_electrode_per_subject]
-        
-        # Select frequency -> (S, T, W)
-        signal_components = over_maximum_electrode[..., frequency_index]
-        
-        # Average over Windows -> (S, T)
-        return np.mean(signal_components, axis=-1), 1/frequency
-
-    def name(self) -> str:
-        return self._name
-
-    def target_frequency(self) -> np.float64:
-        return self.blob.props.target_frequency
-        
-
-    def carrier_frequency(self) -> np.float64:
-        return self.blob.props.carrier_frequency
-
-    @staticmethod
-    def _candidate_distances(
-        c_target: Union[ConditionPhases, Array1D_c64],
-        c_carrier: Union[ConditionPhases, Array1D_c64],
-        T_target: np.float64, T_carrier: np.float64,
-    ) -> ConditionPhases:
-        """
-        Linear part: phasors → array of M complex unit candidate distances along
-        a new last axis, where M = T_target / T_carrier. Each candidate's angle,
-        scaled by T_target / (2π), is a possible latency in seconds. No region
-        selection happens here — that's the lossy step (`_resolve_to_seconds`).
-        """
-        assert T_target // T_carrier == T_target / T_carrier
-        inflation_ratio = T_target // T_carrier
-        norm_target = c_target / np.abs(c_target)
-        norm_carrier = c_carrier / np.abs(c_carrier)
-        adjusted_carrier = norm_carrier ** (1 / inflation_ratio)
-        regions = np.exp(np.arange(inflation_ratio) * 2 * np.pi * 1j / inflation_ratio)
-        possible_carriers = adjusted_carrier[..., np.newaxis] * regions
-        return (norm_target[..., np.newaxis] / possible_carriers).astype(np.complex64)
-
-    @staticmethod
-    def _resolve_to_seconds(
-        distances: Union[ConditionPhases, Array1D_c64], T_target: np.float64,
-        expected_s: float = 0.05,
-    ) -> Array1D_f64:
-        """Non-linear (lossy) part: argmin selection by literature anchor."""
-        assert T_target > expected_s
-        expected_distance = np.exp((expected_s / T_target * 2 * np.pi) * 1j)
-        best_idx = np.argmin(
-            np.abs(np.angle(distances / expected_distance)), -1, keepdims=True,
+    # --- MNERecording ---
+    def mne_info(self) -> mne.Info:
+        # Restrict the info to the active channel subset so topomaps line up.
+        if len(self.channel_indices) == len(self.blob.raw_info.ch_names):
+            return self.blob.raw_info
+        keep = self.channel_names()
+        return mne.pick_info(
+            self.blob.raw_info,
+            sel=[self.blob.raw_info.ch_names.index(n) for n in keep],
+            copy=True,
         )
-        best_dt = np.take_along_axis(distances, best_idx, axis=-1).squeeze(-1)
-        return (np.angle(best_dt) / (2 * np.pi) * T_target).astype(np.float64)
 
-    def calculate_processing_time(self) -> np.ndarray:
-        """
-        Per-trial latency in seconds, shape (Subject, Trial). Resolves the
-        carrier/target phase ambiguity by selecting the candidate closest to
-        50 ms (literature anchor for early visual cortex).
-        """
-        c_target, T_target = self.as_phase(self.target_frequency())
-        c_carrier, T_carrier = self.as_phase(self.carrier_frequency())
-        distances = self._candidate_distances(c_target, c_carrier, T_target, T_carrier)
-        return self._resolve_to_seconds(distances, T_target)
 
-    def calculate_processing_time_summary(
-        self, r_min: float = 0.3
-    ) -> Tuple[Array1D_f64, Array1D_f64]:
-        """
-        Per-subject circular summary of trial-to-trial latency.
+class Subject(SubjectHandle[ConditionProperties, ConditionView]):
+    """A lightweight handle representing a participant in an SSVEP study.
 
-        Returns:
-            mean_ms: shape (S,). Circular-mean latency in ms. The candidate-region
-                     ambiguity is resolved once on the trial-aggregated phase.
-            sd_ms:   shape (S,). Circular SD of carrier-phase jitter in ms:
-                       R = |mean_t exp(i·φ_carrier)|
-                       σ_ms = sqrt(-2 ln R) · 1000 / (2π·f_carrier)
-                     NaN where R < r_min — the small-dispersion approximation
-                     breaks once the phase distribution stops being clustered.
-        """
-        f_carrier = self.carrier_frequency()
-        c_target, T_target = self.as_phase(self.target_frequency())
-        c_carrier, T_carrier = self.as_phase(f_carrier)
-
-        phi_target = np.angle(c_target)
-        phi_carrier = np.angle(c_carrier)
-
-        # Linear: scipy's circular mean across trials, then back to phasors so
-        # the existing _candidate_distances pipeline applies unchanged.
-        mean_phi_target = circmean(phi_target, high=np.pi, low=-np.pi, axis=-1)
-        mean_phi_carrier = circmean(phi_carrier, high=np.pi, low=-np.pi, axis=-1)
-        mean_target_phasor: Array1D_c64 = np.exp(1j * mean_phi_target).astype(np.complex64)
-        mean_carrier_phasor: Array1D_c64 = np.exp(1j * mean_phi_carrier).astype(np.complex64)
-
-        distances = self._candidate_distances(
-            mean_target_phasor, mean_carrier_phasor, T_target, T_carrier,
-        )
-        mean_ms = self._resolve_to_seconds(distances, T_target) * 1000
-
-        # Non-linear: scipy circstd already returns √(−2 ln R) in radians.
-        sd_phi = circstd(phi_carrier, high=np.pi, low=-np.pi, axis=-1)
-        sd_ms = sd_phi * 1000 / (2 * np.pi * f_carrier)
-        # r_min cutoff expressed in σ_φ space: R ≥ r_min ⇔ σ_φ ≤ √(−2 ln r_min).
-        # sd_ms = np.where(sd_phi <= np.sqrt(-2 * np.log(r_min)), sd_ms, np.nan)
-
-        return mean_ms.astype(np.float64), sd_ms.astype(np.float64)
-
-    def frequencies(self) -> Array1D_f64:
-        sfreq = self.blob.raw_info['sfreq']
-        n_points = self.data.shape[-1]
-        window_size = (n_points - 1) * 2
-        return np.fft.rfftfreq(window_size, d=1/sfreq)
-
-class Subject:
+    Identity is defined by a unique integer id. Carries no data — the per-condition
+    views live in self._views and are populated by Study at load time. Pinned to
+    ConditionProperties keys, matching Study's enforcement.
     """
-    A lightweight handle representing a participant.
-    Identity is defined by a unique ID.
-    Knows its own views (blobs).
-    """
-    def __init__(self, subject_id: int, name: str):
-        self._id = subject_id
-        self._name = name
-        self._views: Dict[ConditionProperties, 'ConditionView'] = {}
 
-    @property
-    def id(self) -> int:
-        return self._id
+    def __init__(self, subject_id: int, name: str) -> None:
+        self.id = subject_id
+        self.name = name
+        self._views: Dict[ConditionProperties, ConditionView] = {}
 
-    @property
-    def name(self) -> str:
-        return self._name
+    def conditions(self) -> Dict[ConditionProperties, ConditionView]:
+        return self._views
 
-    def __getitem__(self, props: ConditionProperties) -> 'ConditionView':
-        view = self._views.get(props)
+    def __getitem__(self, key: ConditionProperties) -> ConditionView:
+        view = self._views.get(key)
         if view is None:
-            raise KeyError(f"Subject {self.name} (id={self.id}) did not participate in condition {props}")
+            raise KeyError(
+                f"Subject {self.name} (id={self.id}) did not participate in condition {key}"
+            )
         return view
 
-    def _register_view(self, props: ConditionProperties, view: 'ConditionView'):
-        self._views[props] = view
-
-    def conditions(self) -> Iterator[Tuple[ConditionProperties, 'ConditionView']]:
-        yield from self._views.items()
+    def _register_view(self, key: ConditionProperties, view: ConditionView) -> None:
+        self._views[key] = view
 
     def __repr__(self) -> str:
-        return f"Subject({self._name}, id={self._id})"
+        return f"Subject({self.name}, id={self.id})"
 
     def __hash__(self) -> int:
-        return hash(self._id)
+        return hash(self.id)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Subject):
             return False
-        return self._id == other._id
+        return self.id == other.id
 
-class Study:
+
+class Study(Experiment[ConditionProperties, ConditionView]):
+    """SSVEP-paradigm experiment registry.
+
+    Inherits Experiment[ConditionView]. Stream is typed as ConditionProperties-keyed
+    — that's the type-level enforcement that every blob in this Study has real
+    SSVEP target/carrier frequencies. Non-SSVEP paradigms (e.g. plain string
+    labels from `compose_folders`) need a different Experiment implementor.
+
+    Overrides conditions() and aggregate() for runtime efficiency: data is
+    pre-stacked into ConditionBlobs at construction and the views are reused.
     """
-    Manages the lifecycle of the data blobs and identifies subjects across conditions.
-    Enforces consistent trial counts within conditions.
-    """
-    def __init__(self, data_stream: Iterator[Tuple[str, ConditionProperties, mne.Info, SubjectData]], min_trials: int = 3):
+
+    def __init__(
+        self,
+        data_stream: Iterator[Tuple[str, ConditionProperties, mne.Info, float, RawStudyData]],
+        min_trials: int = 3,
+    ) -> None:
         self._subjects_by_name: Dict[str, Subject] = {}
         self._next_id = 0
-        
-        # Buffer to collect data: props -> name -> List[data]
+
+        # Buffer raw time-domain data per (condition_key, subject_name).
         buffer: Dict[ConditionProperties, Dict[str, List[np.ndarray]]] = {}
         infos: Dict[ConditionProperties, mne.Info] = {}
+        rates: Dict[ConditionProperties, float] = {}
 
-        for name, props, info, data in data_stream:
+        for name, props, info, sample_rate, data in data_stream:
             if name not in self._subjects_by_name:
                 self._subjects_by_name[name] = Subject(self._next_id, name)
                 self._next_id += 1
-            
+
             if props not in buffer:
                 buffer[props] = {}
                 infos[props] = info
-            
-            if name not in buffer[props]:
-                buffer[props][name] = []
-            buffer[props][name].append(data)
+                rates[props] = sample_rate
+
+            buffer[props].setdefault(name, []).append(data)
 
         self._blobs: Dict[ConditionProperties, ConditionBlob] = {}
-        for props, subject_data_map in buffer.items():
-            # Sort by name to ensure deterministic alignment in the blob
-            sorted_names = sorted(subject_data_map.keys())
-            subject_handles = [self._subjects_by_name[name] for name in sorted_names]
-            
-            # Check trial consistency and enforce min_trials
-            subject_trial_data: List[np.ndarray] = []
-            
-            for name in sorted_names:
-                # Concatenate all files for this subject in this condition
-                combined_subj_data = np.concatenate(subject_data_map[name], axis=0)
-                n_trials = combined_subj_data.shape[0]
-                
-                if n_trials < min_trials:
-                    print(f"\nERROR: Subject '{name}' has only {n_trials} trials for condition {props}, which is less than the minimum required ({min_trials}).")
-                    sys.exit(1)
-                
-                # Keep only the first min_trials to ensure consistent dimensions
-                subject_trial_data.append(combined_subj_data[:min_trials])
+        self._group_views: Dict[ConditionProperties, ConditionView] = {}
 
-            # Stack subjects: (Subject, Trial, Electrode, Window, Frequency)
-            blob_data: StudyData = np.stack(subject_trial_data, axis=0).astype(np.complex64)
-            
-            blob = ConditionBlob(blob_data, props, infos[props], subject_handles)
+        for props, subject_data_map in buffer.items():
+            sorted_names = sorted(subject_data_map.keys())
+            subject_handles = [self._subjects_by_name[n] for n in sorted_names]
+
+            subject_trial_data: List[np.ndarray] = []
+            for name in sorted_names:
+                # Concatenate this subject's recordings along the trial axis.
+                # Each recording has shape (1, T_i, C, Time); strip the leading
+                # subject axis before concatenating along trials.
+                per_recording = [d[0] for d in subject_data_map[name]]
+                combined = np.concatenate(per_recording, axis=0)
+                n_trials = combined.shape[0]
+
+                if n_trials < min_trials:
+                    print(
+                        f"\nERROR: Subject '{name}' has only {n_trials} trials for condition {props}, "
+                        f"which is less than the minimum required ({min_trials})."
+                    )
+                    sys.exit(1)
+
+                subject_trial_data.append(combined[:min_trials])
+
+            blob_data: RawStudyData = np.stack(subject_trial_data, axis=0).astype(np.float64)
+            blob = ConditionBlob(blob_data, rates[props], props, infos[props], subject_handles)
             self._blobs[props] = blob
-            
-            # Register views in subjects
+
+            self._group_views[props] = ConditionView(blob)
+
             for i, subj in enumerate(subject_handles):
                 view = ConditionView(blob, subject_idx=i)
                 subj._register_view(props, view)
 
-    def subjects(self) -> Iterator[Subject]:
-        # Return subjects sorted by name for consistency
-        for name in sorted(self._subjects_by_name.keys()):
-            yield self._subjects_by_name[name]
+        # Deterministic iteration order:
+        # - subjects sorted alphabetically by name
+        # - conditions sorted by (target_frequency, carrier_frequency)
+        self._subjects_by_name = {
+            n: self._subjects_by_name[n] for n in sorted(self._subjects_by_name.keys())
+        }
 
-    def conditions(self) -> Iterator[ConditionProperties]:
-        # Return conditions sorted by target frequency, then carrier frequency
-        for props in sorted(self._blobs.keys(), key=lambda p: (p.target_frequency, p.carrier_frequency)):
-            yield props
-
-    def filter_subjects(self, requirements: Set[ConditionProperties]) -> Iterator[Subject]:
-        for subject in self.subjects():
-            participated_in_all = True
-            for req in requirements:
-                if req not in subject._views:
-                    participated_in_all = False
-                    break
-            if participated_in_all:
-                yield subject
-
-    def get_group_view(self, props: ConditionProperties) -> ConditionView:
-        blob = self._blobs.get(props)
-        if blob is None:
-            raise KeyError(f"Condition {props} not found in study")
-        return ConditionView(blob)
-
-    def get_condition(self, props: ConditionProperties) -> ConditionView:
-        blob = self._blobs.get(props)
-        if blob is None:
-            raise KeyError(f"Condition {props} not found in study")
-            
-        # Reshape to flatten Subject dimension into Trial dimension
-        # blob.data: (S, T, E, W, F)
-        s, t, e, w, f = blob.data.shape
-        
-        # Reshape to (1, S*T, E, W, F)
-        aggregate_data: StudyData = blob.data.reshape(1, s*t, e, w, f).astype(np.complex64)
-        
-        new_blob = ConditionBlob(
-            aggregate_data, 
-            blob.props, 
-            blob.raw_info, 
-            [Subject(-1, "Aggregate")]
+        ordered_props = sorted(
+            self._group_views.keys(),
+            key=lambda p: (float(p.target_frequency), float(p.carrier_frequency)),
         )
-        return ConditionView(new_blob, name=f"Aggregate({props.target_frequency}Hz)")
+        self._group_views = {p: self._group_views[p] for p in ordered_props}
+        self._blobs = {p: self._blobs[p] for p in ordered_props}
+
+    # --- Experiment ---
+    def subjects(self) -> Dict[str, Subject]:
+        return self._subjects_by_name
+
+    def conditions(self) -> Dict[ConditionProperties, ConditionView]:
+        return self._group_views
+
+    def filter_subjects(
+        self, requirements,
+    ) -> Iterator[Subject]:
+        req_set = set(requirements)
+        for subj in self._subjects_by_name.values():
+            if req_set.issubset(subj.conditions().keys()):
+                yield subj
+
+    def aggregate(self, key: ConditionProperties) -> ConditionView:
+        blob = self._blobs.get(key)
+        if blob is None:
+            raise KeyError(f"Condition {key} not found in study")
+
+        s, t, c, time = blob.raw_data.shape
+        flat: RawStudyData = blob.raw_data.reshape(1, s * t, c, time).astype(np.float64)
+        new_blob = ConditionBlob(
+            flat, blob.sample_rate, blob.props, blob.raw_info,
+            [Subject(-1, "Aggregate")],
+        )
+        # Stream type guarantees only ConditionProperties keys are stored, so
+        # blob.props is always a real ConditionProperties (no placeholder branch).
+        label = f"Aggregate({blob.props.target_frequency}Hz)"
+        return ConditionView(new_blob, name=label)

@@ -18,8 +18,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from analysis import SSVEPAnalysis
 from core import Study
 from core_types import ConditionProperties
+from interfaces import Experiment, SSVEPRecording
 from loader import StudyLoader
 
 TARGET_ELECTRODES = ["T5", "T6"]
@@ -33,18 +35,18 @@ CONDITION_COLORS = {
 
 
 def per_subject_sds_by_condition(
-    study: Study,
+    study: Experiment[ConditionProperties, SSVEPRecording],
 ) -> dict[ConditionProperties, np.ndarray]:
     """For each condition, return an array of per-subject circular SDs (ms)."""
     by_cond: dict[ConditionProperties, list[float]] = defaultdict(list)
-    for subject in study.subjects():
-        for props, view in subject.conditions():
-            v = view.restrict_electrodes(TARGET_ELECTRODES + V1_ELECTRODES)
-            _, sd_ms = v.calculate_processing_time_summary()
+    for subject in study.subjects().values():
+        for key, view in subject.conditions().items():
+            v = view.take_channels(TARGET_ELECTRODES + V1_ELECTRODES)
+            _, sd_ms = SSVEPAnalysis(v).processing_time_summary()
             sd = float(sd_ms[0])
             if np.isnan(sd):
                 continue
-            by_cond[props].append(sd)
+            by_cond[key].append(sd)
     return {p: np.asarray(v) for p, v in by_cond.items()}
 
 
