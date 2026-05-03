@@ -17,12 +17,15 @@ import sys
 import matplotlib.pyplot as plt
 
 from analysis import Spectral
+from analyze_attention import (
+    attentional_snr_modulation, plot_attentional_snr_modulation,
+)
 from analyze_spectrum import plot_snr_spectra_overlay
 from core_types import AttentionFrequency
 from experiments import dot_experiments
 
 
-TARGET_ELECTRODES = ["O1", "O2"]
+TARGET_ELECTRODES = ["Pz", "O1", "O2"]
 
 
 def main() -> None:
@@ -57,11 +60,21 @@ def main() -> None:
             per_condition.append(f"{key.frequency:.0f}Hz: {snr_mean:.2f}")
         print(f"  {name:<22s}  {'  '.join(per_condition)}")
 
+    print("\nAttentional SNR modulation per frequency (attended - unattended):")
+    for key, (mean_diff, sem_diff) in attentional_snr_modulation(
+        exp, TARGET_ELECTRODES,
+    ).items():
+        print(f"  {key.frequency:.0f} Hz:  ΔSNR = {mean_diff:+.3f} ± {sem_diff:.3f}")
+
     print("\nPlotting overlaid SNR spectra by condition...")
     plot_snr_spectra_overlay(
         exp, fmin=1.0, fmax=49.0, electrodes=TARGET_ELECTRODES,
         label_func=lambda k: f"{k.frequency:.0f} Hz",
     )
+
+    print("Plotting attentional SNR modulation...")
+    plot_attentional_snr_modulation(exp, TARGET_ELECTRODES)
+
     plt.show()
 
 
