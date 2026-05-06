@@ -19,7 +19,7 @@ Generic parameters:
 """
 
 from typing import (
-    Hashable, Iterable, Iterator, List, Mapping, Protocol, Set, TypeVar, runtime_checkable,
+    Hashable, Iterable, Iterator, List, Mapping, Protocol, Set, Tuple, TypeVar, runtime_checkable,
 )
 
 import mne
@@ -33,6 +33,7 @@ from core_types import ConditionProperties, RawStudyData
 # Experiment, where invariance is required for Mapping-typed APIs.
 K_co = TypeVar("K_co", bound=Hashable, covariant=True)
 K = TypeVar("K", bound=Hashable)
+Condition = TypeVar("Condition", bound=Hashable, covariant=True)
 
 
 @runtime_checkable
@@ -130,3 +131,24 @@ class Experiment(Protocol[K, V]):
         for subj in self.subjects().values():
             if req_set.issubset(subj.conditions().keys()):
                 yield subj
+
+
+@runtime_checkable
+class MetadataParser(Protocol[Condition]):
+    """Interprets a metadata configuration string and aggregates per-condition data.
+
+    `parse(metadata, trial_data)` receives the metadata file's contents as a
+    string (the caller does the I/O) and the post-epoch (1, T, C, T_trial)
+    array, and returns one (condition_key, condition_data) pair per condition
+    declared in the metadata. Each `condition_data` is shape (1, T, C, T_K) —
+    the parser performs whatever per-trial sample selection / aggregation is
+    required (contiguous slice, interleaved pickup, reordering); the resulting
+    time axis is uniform across trials so the array stays rectangular.
+
+    File format (JSON, CSV, TOML, ...) is the parser's concern — the composer
+    never opens the metadata file.
+    """
+
+    def parse(
+        self, metadata: str, trial_data: RawStudyData,
+    ) -> Iterable[Tuple[Condition, RawStudyData]]: ...

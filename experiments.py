@@ -23,11 +23,12 @@ import numpy as np
 
 from core import Study
 from core_types import AttentionFrequency, ConditionProperties, RawStudyData
-from interfaces import Experiment, MNERecording, SSVEPRecording
+from interfaces import Experiment, MNERecording, MetadataParser, SSVEPRecording
 from loader import StudyLoader
 
 
 K = TypeVar("K", bound=Hashable)
+Condition = TypeVar("Condition", bound=Hashable)
 
 
 def hebrew_vs_mirror(
@@ -69,3 +70,22 @@ def compose_folders(
     for label, folder in named_folders:
         for subject_name, info, sample_rate, data in load_folder(folder):
             yield subject_name, label, info, sample_rate, data
+
+
+def aggregate_by_metadata(
+    raw_stream: Iterable[Tuple[str, mne.Info, float, RawStudyData]],
+    metadata: str,
+    parser: MetadataParser[Condition],
+) -> Iterator[Tuple[str, Condition, mne.Info, float, RawStudyData]]:
+    """Apply per-condition aggregation declared by `parser` to each subject's trial data.
+
+    `metadata` is the metadata file's contents (caller is responsible for
+    reading the file). For each subject in `raw_stream`, yields one
+    (subject_name, condition_key, info, sample_rate, condition_data) tuple
+    per condition the parser declares. The composer never touches files:
+    recording I/O is upstream (load_folder), metadata I/O is the caller's
+    responsibility.
+    """
+    for subject_name, info, sample_rate, trial_data in raw_stream:
+        for condition_key, condition_data in parser.parse(metadata, trial_data):
+            yield subject_name, condition_key, info, sample_rate, condition_data

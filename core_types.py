@@ -49,3 +49,13 @@ class AttentionFrequency(NamedTuple):
 
     def __repr__(self) -> str:
         return f"AttentionFrequency({self.frequency}Hz)"
+
+
+class AttentionColor(NamedTuple):
+    """Condition key for the segmented attention paradigm:
+    which color the subject is instructed to attend (+/-1).
+    """
+    color: int
+
+    def __repr__(self) -> str:
+        return f"AttentionColor({self.color})"
