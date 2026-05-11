@@ -74,18 +74,20 @@ def compose_folders(
 
 def aggregate_by_metadata(
     raw_stream: Iterable[Tuple[str, mne.Info, float, RawStudyData]],
-    metadata: str,
+    metadata_for: Callable[[str], str],
     parser: MetadataParser[Condition],
 ) -> Iterator[Tuple[str, Condition, mne.Info, float, RawStudyData]]:
     """Apply per-condition aggregation declared by `parser` to each subject's trial data.
 
-    `metadata` is the metadata file's contents (caller is responsible for
-    reading the file). For each subject in `raw_stream`, yields one
+    `metadata_for(subject_name)` returns the metadata file's contents for
+    that subject — caller decides whether all subjects share one string or
+    each has its own. For each subject in `raw_stream`, yields one
     (subject_name, condition_key, info, sample_rate, condition_data) tuple
     per condition the parser declares. The composer never touches files:
-    recording I/O is upstream (load_folder), metadata I/O is the caller's
-    responsibility.
+    recording I/O is upstream (load_folder), metadata I/O lives behind
+    `metadata_for`.
     """
     for subject_name, info, sample_rate, trial_data in raw_stream:
+        metadata = metadata_for(subject_name)
         for condition_key, condition_data in parser.parse(metadata, trial_data):
             yield subject_name, condition_key, info, sample_rate, condition_data
