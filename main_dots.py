@@ -124,14 +124,11 @@ def main() -> None:
             print(f"Error: no *.json metadata files in {metadata_dir}")
             sys.exit(1)
 
-        # tmax for mne.Epochs: tmin (2.5 s, baked into _load_edf) plus the
-        # longest trial's worth of steady-state + response-time quantas,
-        # taken across all subjects' metadata.
-        max_walked = max(
-            sum(s["steady_state_quantas"] for s in t) + max(len(t) - 1, 0)
+        durations = [
+            (float(sum(s["steady_state_quantas"] for s in t) + len(t)))*2
             for md in metadata_by_subject.values()
             for t in json.loads(md)
-        )
+        ]
 
         def metadata_for(subject_name: str) -> str:
             if subject_name not in metadata_by_subject:
@@ -141,7 +138,7 @@ def main() -> None:
                 )
             return metadata_by_subject[subject_name]
 
-        stream = StudyLoader().load_folder(root_dir, duration=2.5 + max_walked * 2.0)
+        stream = StudyLoader().load_folder(root_dir, durations=durations)
         exp_color = Study(
             aggregate_by_metadata(stream, metadata_for, AttentionColorParser(sample_rate=300.0)),
             min_trials=3,

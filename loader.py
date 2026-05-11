@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Iterator, Tuple
+from typing import Iterator, List, Tuple
 
 import mne
 import numpy as np
@@ -37,7 +37,7 @@ class StudyLoader:
             duration,
         )
 
-    def _load_edf(self, file_path: str, duration: float) -> Tuple[RawStudyData, mne.Info]:
+    def _load_edf(self, file_path: str, durations: List[float]) -> Tuple[RawStudyData, mne.Info]:
         raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
 
         raw.rename_channels(lambda s: s.replace(
@@ -57,22 +57,29 @@ class StudyLoader:
         valids = np.argwhere(diffs > 1000).flatten()
         events = events[valids]
 
-        epochs = mne.Epochs(
-            raw,
-            picks='data',
-            events=events,
-            tmin=2.5,  # Constant for 3 seconds delay minus 0.5 sec
-            tmax=duration,
-            baseline=None,
-        )
+        assert events.shape[0] == len(durations)
+        maximum_duration = max(durations)
+        trials = []
+        for event, duration in zip(events, durations):
+            epoch = mne.Epochs(
+                raw,
+                picks='data',
+                events=[event],
+                tmin=2.5,  # Constant for 3 seconds delay minus 0.5 sec
+                tmax=2.5+duration,
+                baseline=None,
+            )
 
-        # epochs.get_data: (Trial, Channel, Time). Promote to (1, T, C, Time)
+            per_subject = epoch.get_data(units="mV").astype(np.float64)
+            padded = np.pad(per_subject, ((0,0),(0,0),(0,int(maximum_duration*raw.info["sfreq"]+1-per_subject.shape[-1]))))
+            trials.append(padded)
+
+        # epochs.get_data: (Trial, Channel, Time). Promote to (1, Trial, C, Time)
         # so it lines up with the (S, T, C, Time) RawStudyData contract.
-        per_subject = epochs.get_data(units="mV").astype(np.float64)
-        return per_subject[np.newaxis, ...], raw.info
+        return np.vstack(trials)[np.newaxis, ...], raw.info
 
     def load_folder(
-        self, folder_path: str, duration: float = 60.0,
+        self, folder_path: str, durations: List[float] = [60.0],
     ) -> Iterator[Tuple[str, mne.Info, float, RawStudyData]]:
         """Read all .edf files in one folder, yielding (subject_name, info, sample_rate, raw_data).
 
@@ -88,7 +95,7 @@ class StudyLoader:
             subject_name = os.path.splitext(file_name)[0].split("_raw")[0]
 
             try:
-                data, info = self._load_edf(file_path, duration)
+                data, info = self._load_edf(file_path, durations)
                 yield subject_name, info, float(info["sfreq"]), data
             except Exception as e:
                 print(f"Error loading {file_path}: {e}")
@@ -110,5 +117,5 @@ class StudyLoader:
             except ValueError:
                 continue  # Skip folders that don't match the SSVEP-paradigm pattern
 
-            for subject_name, info, sample_rate, data in self.load_folder(folder_path, duration):
+            for subject_name, info, sample_rate, data in self.load_folder(folder_path, [duration]):
                 yield subject_name, props, info, sample_rate, data
