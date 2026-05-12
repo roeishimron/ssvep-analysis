@@ -18,7 +18,6 @@ parameterised. The common analysis lives in `_run_common` so each branch
 hands it a K-narrow `exp`, keeping pyright happy.
 """
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -33,9 +32,8 @@ from analyze_attention import (
 from analyze_spectrum import plot_snr_spectra_overlay
 from attention_metadata import AttentionColorParser
 from core import Study
-from experiments import aggregate_by_metadata, dot_experiments
+from experiments import dot_experiments, load_segmented
 from interfaces import Experiment, Recording
-from loader import StudyLoader
 
 
 TARGET_ELECTRODES = ["Pz", "O1", "O2"]
@@ -116,22 +114,13 @@ def main() -> None:
     else:
         print(f"Loading segmented recordings from {root_dir} with {metadata_dir}...")
         # Read every subject's metadata once. Filename stem (without
-        # extension) must equal the subject_name produced by load_folder.
+        # extension) must equal the subject_name parsed from each EDF.
         metadata_by_subject = {
             p.stem: p.read_text() for p in Path(metadata_dir).glob("*.json")
         }
         if not metadata_by_subject:
             print(f"Error: no *.json metadata files in {metadata_dir}")
             sys.exit(1)
-
-        # tmax for mne.Epochs: tmin (2.5 s, baked into _load_edf) plus the
-        # longest trial's worth of steady-state + response-time quantas,
-        # taken across all subjects' metadata.
-        max_walked = max(
-            sum(s["steady_state_quantas"] for s in t) + max(len(t) - 1, 0)
-            for md in metadata_by_subject.values()
-            for t in json.loads(md)
-        )
 
         def metadata_for(subject_name: str) -> str:
             if subject_name not in metadata_by_subject:
@@ -141,9 +130,8 @@ def main() -> None:
                 )
             return metadata_by_subject[subject_name]
 
-        stream = StudyLoader().load_folder(root_dir, duration=2.5 + max_walked * 2.0)
         exp_color = Study(
-            aggregate_by_metadata(stream, metadata_for, AttentionColorParser(sample_rate=300.0)),
+            load_segmented(root_dir, metadata_for, AttentionColorParser(sample_rate=300.0)),
             min_trials=3,
         )
         _run_common(

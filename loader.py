@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Iterator, Tuple
+from typing import Iterator, List, Tuple
 
 import mne
 import numpy as np
@@ -37,7 +37,13 @@ class StudyLoader:
             duration,
         )
 
-    def _load_edf(self, file_path: str, duration: float) -> Tuple[RawStudyData, mne.Info]:
+    def _read_raw_with_events(self, file_path: str) -> Tuple[mne.io.BaseRaw, np.ndarray]:
+        """Read + preprocess one EDF, returning (raw, valid_events).
+
+        Shared by `_load_edf` (fixed-tmax epoching) and `_load_edf_per_trial`
+        (per-trial-variable durations). Trigger filtering matches the prior
+        in-line code: keep events whose inter-event gap exceeds 1000 samples.
+        """
         raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
 
         raw.rename_channels(lambda s: s.replace(
@@ -55,7 +61,10 @@ class StudyLoader:
 
         diffs = np.diff(events[:, 0], append=raw.last_samp)
         valids = np.argwhere(diffs > 1000).flatten()
-        events = events[valids]
+        return raw, events[valids]
+
+    def _load_edf(self, file_path: str, duration: float) -> Tuple[RawStudyData, mne.Info]:
+        raw, events = self._read_raw_with_events(file_path)
 
         epochs = mne.Epochs(
             raw,
@@ -70,6 +79,49 @@ class StudyLoader:
         # so it lines up with the (S, T, C, Time) RawStudyData contract.
         per_subject = epochs.get_data(units="mV").astype(np.float64)
         return per_subject[np.newaxis, ...], raw.info
+
+    def _load_edf_per_trial(
+        self, file_path: str, trial_durations_s: List[float],
+    ) -> Tuple[RawStudyData, mne.Info]:
+        """Slice the continuous EDF per trigger using metadata-declared durations.
+
+        Each trial gets its own `mne.Epochs` call so tmax can vary per
+        trigger. Within a subject's array, shorter trials are zero-padded
+        to the longest trial's sample length so the (T, C, T_max) shape
+        stays rectangular; the parser aggregates only over each trial's
+        valid (un-padded) range.
+        """
+        raw, events = self._read_raw_with_events(file_path)
+
+        n_trials = len(trial_durations_s)
+        if len(events) != n_trials:
+            raise ValueError(
+                f"{file_path}: {len(events)} valid triggers, "
+                f"metadata declares {n_trials} trials"
+            )
+
+        durations = [2.5 + d for d in trial_durations_s]
+        per_trial: List[np.ndarray] = []
+        for event, duration in zip(events, durations):
+            epoch = mne.Epochs(
+                raw,
+                picks='data',
+                events=np.array([event]),
+                tmin=2.5,  # Constant for 3 seconds delay minus 0.5 sec
+                tmax=duration,
+                baseline=None,
+                verbose=False,
+            )
+            arr = np.asarray(epoch.get_data(units="mV"), dtype=np.float64)
+            per_trial.append(arr[0])  # (1, C, T_i) -> (C, T_i)
+
+        max_samples = max(arr.shape[-1] for arr in per_trial)
+        n_channels = per_trial[0].shape[0]
+        output = np.zeros((n_trials, n_channels, max_samples), dtype=np.float64)
+        for i, arr in enumerate(per_trial):
+            output[i, :, :arr.shape[-1]] = arr
+
+        return output[np.newaxis, ...], raw.info
 
     def load_folder(
         self, folder_path: str, duration: float = 60.0,

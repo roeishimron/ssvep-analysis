@@ -34,6 +34,18 @@ class AttentionColorParser:
     def __init__(self, sample_rate: float = 300.0):
         self._samples_per_quanta = int(2.0 * sample_rate)
 
+    def trial_durations_s(self, metadata: str) -> List[float]:
+        """Per-trial durations in seconds: steady-state quantas + response-time gaps.
+
+        Each segment of `steady_state_quantas=N` contributes N quantas; one
+        further quanta is added per pair of consecutive segments for the
+        response-time gap. Quanta is 2 s.
+        """
+        return [
+            (sum(seg["steady_state_quantas"] for seg in segs) + max(len(segs) - 1, 0)) * 2.0
+            for segs in json.loads(metadata)
+        ]
+
     def parse(
         self,
         metadata: str,

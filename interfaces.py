@@ -137,17 +137,24 @@ class Experiment(Protocol[K, V]):
 class MetadataParser(Protocol[Condition]):
     """Interprets a metadata configuration string and aggregates per-condition data.
 
-    `parse(metadata, trial_data)` receives the metadata file's contents as a
-    string (the caller does the I/O) and the post-epoch (1, T, C, T_trial)
-    array, and returns one (condition_key, condition_data) pair per condition
-    declared in the metadata. Each `condition_data` is shape (1, T, C, T_K) —
-    the parser performs whatever per-trial sample selection / aggregation is
-    required (contiguous slice, interleaved pickup, reordering); the resulting
-    time axis is uniform across trials so the array stays rectangular.
+    `trial_durations_s(metadata)` declares how long each trial is in seconds
+    (relative to the trigger, after the loader's fixed pre-trial offset).
+    Durations may differ across trials within one recording. The loader uses
+    this list to slice the continuous EDF per-trigger.
 
-    File format (JSON, CSV, TOML, ...) is the parser's concern — the composer
-    never opens the metadata file.
+    `parse(metadata, trial_data)` receives the metadata string and a
+    (1, T, C, T_max) ndarray where T_max is the longest trial in the same
+    recording (shorter trials are zero-padded to T_max). The parser must
+    return one (condition_key, condition_data) pair per condition, each
+    shape (1, T, C, T_K), aggregating only over the valid (un-padded) range
+    of each trial. T_K must be uniform across trials so the result is
+    rectangular.
+
+    File format (JSON, CSV, TOML, ...) is the parser's concern — the
+    composer never opens the metadata file.
     """
+
+    def trial_durations_s(self, metadata: str) -> List[float]: ...
 
     def parse(
         self, metadata: str, trial_data: RawStudyData,

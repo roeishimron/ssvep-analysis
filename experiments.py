@@ -79,15 +79,54 @@ def aggregate_by_metadata(
 ) -> Iterator[Tuple[str, Condition, mne.Info, float, RawStudyData]]:
     """Apply per-condition aggregation declared by `parser` to each subject's trial data.
 
-    `metadata_for(subject_name)` returns the metadata file's contents for
-    that subject — caller decides whether all subjects share one string or
-    each has its own. For each subject in `raw_stream`, yields one
-    (subject_name, condition_key, info, sample_rate, condition_data) tuple
-    per condition the parser declares. The composer never touches files:
-    recording I/O is upstream (load_folder), metadata I/O lives behind
-    `metadata_for`.
+    Use this when the upstream stream already produces a rectangular
+    (1, T, C, T_trial) per subject and you only need the parser to split
+    by condition. For paradigms with per-trial-variable durations use
+    `load_segmented` instead — it reads each EDF with per-trial slicing.
     """
     for subject_name, info, sample_rate, trial_data in raw_stream:
         metadata = metadata_for(subject_name)
         for condition_key, condition_data in parser.parse(metadata, trial_data):
             yield subject_name, condition_key, info, sample_rate, condition_data
+
+
+def load_segmented(
+    folder_path: str,
+    metadata_for: Callable[[str], str],
+    parser: MetadataParser[Condition],
+    *,
+    loader: "StudyLoader | None" = None,
+) -> Iterator[Tuple[str, Condition, mne.Info, float, RawStudyData]]:
+    """End-to-end loader for metadata-segmented EDFs with per-trial-variable durations.
+
+    For each .edf in `folder_path`:
+      - Looks up the subject's metadata via `metadata_for(subject_name)`.
+      - Asks `parser.trial_durations_s(metadata)` for that subject's per-trial
+        durations (in seconds, relative to each trigger).
+      - Slices the continuous EDF per-trigger via `loader._load_edf_per_trial`,
+        zero-padding shorter trials inside the subject's array.
+      - Hands the (1, T, C, T_max_for_subject) array to `parser.parse`, which
+        yields rectangular per-condition recordings.
+
+    Each subject's T_max differs (depending on their layout), but per-condition
+    `T_K` is uniform across subjects when the paradigm is consistent — so the
+    downstream `Study` registry stacks subjects rectangularly per condition.
+    """
+    loader = loader or StudyLoader()
+    for file_name in os.listdir(folder_path):
+        if not file_name.endswith(".edf"):
+            continue
+
+        file_path = os.path.join(folder_path, file_name)
+        subject_name = os.path.splitext(file_name)[0].split("_raw")[0]
+
+        try:
+            metadata = metadata_for(subject_name)
+            durations = parser.trial_durations_s(metadata)
+            data, info = loader._load_edf_per_trial(file_path, durations)
+            sample_rate = float(info["sfreq"])
+            for condition_key, condition_data in parser.parse(metadata, data):
+                yield subject_name, condition_key, info, sample_rate, condition_data
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+            continue
