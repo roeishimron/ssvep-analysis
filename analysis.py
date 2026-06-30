@@ -318,30 +318,23 @@ class SSVEPAnalysis(Spectral):
         """
         del r_min  # parity with old API; mask intentionally not applied
         f_carrier = self._carrier_frequency()
+
+        # Data is up-to trial level (window is already averaged)
         c_target, T_target = self.phase_at(self._target_frequency())
         c_carrier, T_carrier = self.phase_at(f_carrier)
 
-        phi_target = np.angle(c_target)
-        phi_carrier = np.angle(c_carrier)
-
-        # high/low omitted intentionally — scipy stub typing rejects float bounds,
-        # and the canonical interval doesn't matter here: every result feeds
-        # straight into np.exp(1j * angle), which is invariant to angle wrapping.
-        mean_phi_target = circmean(phi_target, axis=-1)
-        mean_phi_carrier = circmean(phi_carrier, axis=-1)
-        mean_target_phasor: Array1D_c64 = np.exp(1j * mean_phi_target).astype(np.complex64)
-        mean_carrier_phasor: Array1D_c64 = np.exp(1j * mean_phi_carrier).astype(np.complex64)
-
         distances = self._candidate_distances(
-            mean_target_phasor, mean_carrier_phasor, T_target, T_carrier,
+            c_target, c_carrier, T_target, T_carrier,
         )
-        mean_ms = self._resolve_to_seconds(
-            distances, T_target, expected_s=self.expected_latency_s,
-        ) * 1000.0
 
-        sd_phi = circstd(phi_carrier, axis=-1)
-        sd_ms = sd_phi * 1000.0 / (2 * np.pi * f_carrier)
-        return mean_ms.astype(np.float64), sd_ms.astype(np.float64)
+        chosen_distance_per_trial = self._choose_best_distances(
+            distances, T_target, expected_s=self.expected_latency_s,
+        )
+
+        mean_distances = np.mean(chosen_distance_per_trial, axis=-1)
+        sd_distances = circstd(np.angle(chosen_distance_per_trial), axis=-1)  / 2 / np.pi * T_target * 1000
+
+        return (np.angle(mean_distances) * T_target / (2*np.pi) * 1000).astype(np.float64), sd_distances.astype(np.float64)
 
     @staticmethod
     def _candidate_distances(
@@ -351,6 +344,7 @@ class SSVEPAnalysis(Spectral):
 
         Returns an array with a new last axis of length M = T_target / T_carrier.
         Each candidate's angle, scaled by T_target/(2π), is a possible latency.
+        Units are according to the Target
         """
         assert T_target // T_carrier == T_target / T_carrier
         inflation_ratio = T_target // T_carrier
@@ -362,7 +356,7 @@ class SSVEPAnalysis(Spectral):
         return (norm_target[..., np.newaxis] / possible_carriers).astype(np.complex64)
 
     @staticmethod
-    def _resolve_to_seconds(
+    def _choose_best_distances(
         distances, T_target: float, expected_s: float = 0.05,
     ) -> Array1D_f64:
         """Non-linear (lossy) part: argmin selection by literature anchor."""
@@ -373,4 +367,4 @@ class SSVEPAnalysis(Spectral):
             axis=-1, keepdims=True,
         )
         best_dt = np.take_along_axis(distances, best_idx, axis=-1).squeeze(-1)
-        return (np.angle(best_dt) / (2 * np.pi) * T_target).astype(np.float64)
+        return best_dt
