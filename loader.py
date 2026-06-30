@@ -48,8 +48,13 @@ class StudyLoader:
 
         raw.rename_channels(lambda s: s.replace(
             "EEG ", "").replace("-Pz", ""), False)
-
-        raw.drop_channels(['Ax', 'Ay', 'Az'])
+        
+        try:
+            raw.drop_channels(['Ax', 'Ay', 'Az'])
+        except:
+            raw.drop_channels(['X1:', 'X2:', 'X3:'])
+            
+        
         raw.drop_channels(['Event', 'CM'])
         raw.drop_channels([c for c in raw.ch_names if ":" in c])
         raw.set_montage(montage='standard_1020')
