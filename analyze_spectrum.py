@@ -1,4 +1,4 @@
-from typing import Callable, Hashable, Iterator, List, Tuple, TypeVar
+from typing import Callable, Dict, Hashable, Iterator, List, Tuple, TypeVar
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -233,37 +233,37 @@ class CarrierComparisonAnalysis:
         plt.tight_layout()
 
 
-def plot_latency_mean_vs_snr_slope(
+def _plot_latency_mean_vs_snr_metric(
     study: Experiment[ConditionProperties, SSVEPRecording],
     carriers: List[float],
     latency_carriers: List[float],
     target_electrodes: List[str],
     carrier_electrodes: List[str],
+    metric_by_subject: Dict[str, float],
+    metric_label: str,
+    figure_label: str,
 ) -> None:
-    """Scatter plot: mean processing-time vs. SNR-slope-across-carriers per subject.
+    """Scatter plot of per-subject latency mean against an arbitrary SNR metric.
 
-    Latencies are pooled across `latency_carriers` per subject for tighter SEM.
+    `metric_by_subject` maps subject name -> x-value (e.g. SNR slope or SNR at a
+    given carrier). Latencies are pooled across `latency_carriers` per subject
+    for tighter SEM. Only subjects with all required conditions are plotted.
     """
-    comparison = CarrierComparisonAnalysis(study, carriers, target_electrodes)
-    data = list(comparison._get_comparison_data())
-    if not data:
-        print("No data for Latency mean vs SNR Slope analysis.")
-        return
-
-    slopes_dict = dict(comparison.slopes(iter(data)))
     all_subjects = study.subjects()
 
     latency_requirements = {
         ConditionProperties(np.float64(5), np.float64(c)) for c in latency_carriers
     }
-    eligible_names = {s.name for s in study.filter_subjects(latency_requirements)}
+    carrier_requirements = {
+        ConditionProperties(np.float64(5), np.float64(c)) for c in carriers
+    }
+    eligible_names = {s.name for s in study.filter_subjects(latency_requirements.union(carrier_requirements))}
 
-    names: List[str] = []
-    slope_values: List[float] = []
+    metric_values: List[float] = []
     mean_values: List[float] = []
     sd_values: List[float] = []
 
-    for name, slope in slopes_dict.items():
+    for name, metric in metric_by_subject.items():
         if name not in eligible_names:
             continue
         subject = all_subjects[name]
@@ -280,34 +280,77 @@ def plot_latency_mean_vs_snr_slope(
         mean = float(np.mean(per_carrier_means))
         lat_sd = float(np.sqrt(np.mean(np.square(per_carrier_sds))))
 
-        names.append(name)
-        slope_values.append(float(slope))
+        metric_values.append(float(metric))
         mean_values.append(mean)
         sd_values.append(lat_sd)
 
-    if not slope_values:
-        print("No matching subjects for Latency mean vs SNR Slope plot.")
+    if not metric_values:
+        print(f"No matching subjects for Latency mean vs {metric_label} plot.")
         return
 
-    fig, ax = plt.subplots(figsize=(8, 6), label="latency-mean-vs-snr-slope")
+    fig, ax = plt.subplots(figsize=(8, 6), label=figure_label)
     ax.errorbar(
-        slope_values, mean_values, yerr=sd_values,
+        metric_values, mean_values, yerr=sd_values,
         fmt='o', color='blue', alpha=0.7, capsize=3,
-        label='mean ± SD (trial-to-trial)',
+        label='mean ± sd (trial-to-trial)',
     )
-    _ = names  # subject names omitted from the exported figure on purpose
 
-    if len(slope_values) > 1:
-        r, p = pearsonr(slope_values, mean_values)
-        title = f"Latency mean vs. SNR Slope\n(r={r:.3f}, p={p:.3f})"
-    else:
-        title = "Latency mean vs. SNR Slope"
+    title = f"Latency mean vs. {metric_label}"
+    if len(metric_values) > 1:
+        r, p = pearsonr(metric_values, mean_values)
+        title += f"\n(r={r:.3f}, p={p:.3f})"
 
     ax.set_title(title)
-    ax.set_xlabel("SNR Slope (SNR/Hz)")
+    ax.set_xlabel(metric_label)
     ax.set_ylabel("Latency mean (ms)")
     ax.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
+
+
+def plot_latency_mean_vs_snr_slope(
+    study: Experiment[ConditionProperties, SSVEPRecording],
+    carriers: List[float],
+    latency_carriers: List[float],
+    target_electrodes: List[str],
+    carrier_electrodes: List[str],
+) -> None:
+    """Scatter plot: mean processing-time vs. SNR-slope-across-carriers per subject."""
+    comparison = CarrierComparisonAnalysis(study, carriers, target_electrodes)
+    data = list(comparison._get_comparison_data())
+    if not data:
+        print("No data for Latency mean vs SNR Slope analysis.")
+        return
+
+    _plot_latency_mean_vs_snr_metric(
+        study, carriers, latency_carriers, target_electrodes, carrier_electrodes,
+        metric_by_subject=dict(comparison.slopes(iter(data))),
+        metric_label="SNR Slope (SNR/Hz)",
+        figure_label="latency-mean-vs-snr-slope",
+    )
+
+
+def plot_latency_mean_vs_snr_at_carrier(
+    study: Experiment[ConditionProperties, SSVEPRecording],
+    carriers: List[float],
+    snr_carrier: float,
+    latency_carriers: List[float],
+    target_electrodes: List[str],
+    carrier_electrodes: List[str],
+) -> None:
+    """Scatter plot: mean processing-time vs. SNR at `snr_carrier` Hz per subject."""
+    comparison = CarrierComparisonAnalysis(study, carriers, target_electrodes)
+    data = list(comparison._get_comparison_data())
+    if not data:
+        print("No data for Latency mean vs SNR-at-carrier analysis.")
+        return
+
+    carrier_index = comparison.carriers.index(np.float64(snr_carrier))
+    _plot_latency_mean_vs_snr_metric(
+        study, carriers, latency_carriers, target_electrodes, carrier_electrodes,
+        metric_by_subject={name: snrs[carrier_index][0] for name, snrs in data},
+        metric_label=f"SNR at {snr_carrier:g} Hz",
+        figure_label=f"latency-mean-vs-snr-at-{snr_carrier:g}hz",
+    )
 
 
 def plot_snr_spectra_overlay(
