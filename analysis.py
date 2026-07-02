@@ -223,6 +223,9 @@ class Spectral:
         snr_avg_trial = snr_target.mean(axis=1)           # (S, C)
         best_channel = np.argmax(snr_avg_trial, axis=-1)  # (S,)
 
+        if snr_avg_trial[0, best_channel] < 2:
+            print("Analyzing improper trial, SNR is less then 2")
+
         fourier = self._fourier_cache  # (S, T, C, W, F)
         s_idx = np.arange(fourier.shape[0])
         # Index (S, T, W, F) by picking each subject's best channel:
@@ -312,14 +315,14 @@ class SSVEPAnalysis(Spectral):
 
         mean_ms: circular-mean latency (ms) after resolving the candidate-region
                  ambiguity once on the trial-aggregated phase.
-        sd_ms:   circular SD of carrier-phase jitter, in ms.
+        sd_ms:   circular sd of carrier-phase jitter, in ms.
                  r_min currently only kept for API parity; mask is intentionally
                  not applied here (see core.py history).
         """
         del r_min  # parity with old API; mask intentionally not applied
         f_carrier = self._carrier_frequency()
 
-        # Data is up-to trial level (window is already averaged)
+        # Data is up-to trial level (window is already averaged), T_* is the time in seconds.
         c_target, T_target = self.phase_at(self._target_frequency())
         c_carrier, T_carrier = self.phase_at(f_carrier)
 
@@ -332,6 +335,7 @@ class SSVEPAnalysis(Spectral):
         )
 
         mean_distances = np.mean(chosen_distance_per_trial, axis=-1)
+        
         sd_distances = circstd(np.angle(chosen_distance_per_trial), axis=-1)  / 2 / np.pi * T_target * 1000
 
         return (np.angle(mean_distances) * T_target / (2*np.pi) * 1000).astype(np.float64), sd_distances.astype(np.float64)
