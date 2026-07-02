@@ -8,10 +8,12 @@ from core_types import ConditionProperties
 from loader import StudyLoader
 from analyze_spectrum import (
     analyze_spectrum, plot_snrs, plot_snr_comparison, CarrierComparisonAnalysis,
-    plot_latency_mean_vs_snr_slope
+    plot_latency_mean_vs_snr_slope, plot_latency_mean_vs_snr_at_carrier
 )
 from figure_latency_variance import (
-    per_subject_sds_by_condition, build_figure as build_variance_figure,
+    per_subject_sds_by_condition, build_figure as build_sd_figure,
+    per_subject_between_carrier_spread, build_between_carrier_figure,
+    per_subject_target_signal_by_condition, build_target_signal_figure,
 )
 import matplot2tikz
 
@@ -75,13 +77,13 @@ def main():
     # 5. Subject-wise Carrier Comparison (10Hz vs 15Hz)
     print("\nPlotting Subject-wise SNR Comparison (10Hz vs 15Hz carrier) for T5...")
     try:
-        comparison = CarrierComparisonAnalysis(study, [10, 15], TARGET_ELECTRODES)
+        comparison = CarrierComparisonAnalysis(study, [10, 15, 20], TARGET_ELECTRODES)
         comparison.plot()
     except ValueError as e:
         print(f"Skipping carrier comparison: {e}")
 
     # 6. Phase Latency Analysis pooled across carrier groups
-    LATENCY_CARRIERS = [10.0]
+    LATENCY_CARRIERS = [10.0, 15.0, 20.0]
     print(f"\nAnalyzing Phase Latency pooled across carriers {LATENCY_CARRIERS}Hz...")
 
     # Only include subjects who participated in EVERY latency-carrier condition
@@ -122,11 +124,32 @@ def main():
     except Exception as e:
         print(f"Could not perform Latency mean vs SNR Slope analysis: {e}")
 
-    # 8. Per-subject circular-SD latency distribution, split by condition
-    print("\nPlotting per-subject latency circular-SD distribution by condition...")
+    # 7b. Latency mean vs. SNR at 20 Hz Analysis
+    print("\nAnalyzing Latency mean vs. SNR at 20 Hz...")
+    try:
+        plot_latency_mean_vs_snr_at_carrier(
+            study, [10, 15, 20], 10, LATENCY_CARRIERS, TARGET_ELECTRODES, V1_ELECTRODES
+        )
+    except Exception as e:
+        print(f"Could not perform Latency mean vs SNR at 20 Hz analysis: {e}")
+
+    # 8. Per-subject circular-sd latency distribution, split by condition
+    print("\nPlotting per-subject latency circular-sd distribution by condition...")
     by_cond = per_subject_sds_by_condition(study)
     if by_cond:
-        build_variance_figure(by_cond)
+        build_sd_figure(by_cond)
+
+    # 9. Distribution of between-carrier spread of the processing-time estimate
+    print("\nPlotting between-carrier processing-time spread distribution...")
+    spreads = per_subject_between_carrier_spread(study, LATENCY_CARRIERS)
+    if spreads.size:
+        build_between_carrier_figure(spreads, LATENCY_CARRIERS)
+
+    # 10. Distribution of MAX[T5,T6] target signal at 5 Hz, per carrier
+    print("\nPlotting MAX[T5,T6] target-signal distribution per carrier...")
+    signal_by_cond = per_subject_target_signal_by_condition(study)
+    if signal_by_cond:
+        build_target_signal_figure(signal_by_cond)
 
     print("Saving plots...")
     os.makedirs("figures", exist_ok=True)
@@ -139,7 +162,7 @@ def main():
         # Topomap figures are included in the LyX doc as topo{carrier}.png;
         # matplot2tikz struggles with mne topomaps anyway, so emit a PNG too.
         if "topomap" in label:
-            for carrier in (10, 15, 20):
+            for carrier in (10, 15, 20, 30):
                 if f"-{carrier}.0-" in label:
                     fig.savefig(f"figures/topo{carrier}.png", dpi=150, bbox_inches="tight")
                     break
