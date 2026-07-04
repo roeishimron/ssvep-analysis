@@ -14,6 +14,7 @@ from figure_latency_variance import (
     per_subject_sds_by_condition, build_figure as build_sd_figure,
     per_subject_between_carrier_spread, build_between_carrier_figure,
     per_subject_target_signal_by_condition, build_target_signal_figure,
+    per_subject_carrier_signal_by_condition, build_carrier_signal_figure,
 )
 import matplot2tikz
 
@@ -150,6 +151,12 @@ def main():
     signal_by_cond = per_subject_target_signal_by_condition(study)
     if signal_by_cond:
         build_target_signal_figure(signal_by_cond)
+
+    # 11. Distribution of MAX[O1,O2] carrier signal at carrier freq, per carrier
+    print("\nPlotting MAX[O1,O2] carrier-signal distribution per carrier...")
+    carrier_signal_by_cond = per_subject_carrier_signal_by_condition(study)
+    if carrier_signal_by_cond:
+        build_carrier_signal_figure(carrier_signal_by_cond)
 
     print("Saving plots...")
     os.makedirs("figures", exist_ok=True)

@@ -68,20 +68,39 @@ def per_subject_target_signal_by_condition(
     return {p: np.asarray(v) for p, v in by_cond.items()}
 
 
-def build_target_signal_figure(
+def per_subject_carrier_signal_by_condition(
+    study: Experiment[ConditionProperties, SSVEPRecording],
+) -> dict[ConditionProperties, np.ndarray]:
+    """For each condition, per-subject MAX SNR over O1/O2 at the carrier frequency.
+
+    "Signal" is the trial-averaged SNR at the condition's carrier frequency; MAX
+    picks the stronger of the two V1 electrodes per subject.
+    """
+    by_cond: dict[ConditionProperties, list[float]] = defaultdict(list)
+    for subject in study.subjects().values():
+        for key, view in subject.conditions().items():
+            spectral = Spectral(view.take_channels(V1_ELECTRODES))
+            idx = spectral._closest_index(float(key.carrier_frequency))
+            per_channel = spectral.snr_topomap()[:, idx]  # (C,) over O1/O2
+            by_cond[key].append(float(np.max(per_channel)))
+    return {p: np.asarray(v) for p, v in by_cond.items()}
+
+
+def _build_signal_by_condition_figure(
     by_cond: dict[ConditionProperties, np.ndarray],
-    target_frequency: float = 5.0,
+    xlabel: str,
+    suptitle: str,
+    figure_label: str,
 ) -> plt.Figure:
-    """One histogram per carrier of the per-subject MAX[T5,T6] target SNR."""
+    """One histogram per carrier of a per-subject scalar signal, shared x-axis."""
     sorted_props = sorted(by_cond.keys(), key=lambda p: p.carrier_frequency)
     n = len(sorted_props)
 
     all_vals = np.concatenate(list(by_cond.values())) if by_cond else np.array([0.0])
-    bins = np.linspace(0, float(np.max(all_vals)) * 1.05 + 1e-9, 24)
+    bins = np.arange(0, np.ceil(float(np.max(all_vals))) + 1, 1.0)
 
     fig, axes = plt.subplots(
-        n, 1, figsize=(8, 2.4 * n), sharex=True,
-        label="target-signal-max-t5t6-by-condition",
+        n, 1, figsize=(8, 2.4 * n), sharex=True, label=figure_label,
     )
     if n == 1:
         axes = [axes]
@@ -105,13 +124,35 @@ def build_target_signal_figure(
         ax.legend(fontsize=8)
         ax.grid(axis="y", alpha=0.3)
 
-    axes[-1].set_xlabel(f"MAX[T5,T6] SNR at {target_frequency:g} Hz")
-    fig.suptitle(
-        f"Per-subject target-response signal (MAX[T5,T6] SNR at {target_frequency:g} Hz), by carrier",
-        weight="bold",
-    )
+    axes[-1].set_xlabel(xlabel)
+    fig.suptitle(suptitle, weight="bold")
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     return fig
+
+
+def build_target_signal_figure(
+    by_cond: dict[ConditionProperties, np.ndarray],
+    target_frequency: float = 5.0,
+) -> plt.Figure:
+    """One histogram per carrier of the per-subject MAX[T5,T6] target SNR."""
+    return _build_signal_by_condition_figure(
+        by_cond,
+        xlabel=f"MAX[T5,T6] SNR at {target_frequency:g} Hz",
+        suptitle=f"Per-subject target-response signal (MAX[T5,T6] SNR at {target_frequency:g} Hz), by carrier",
+        figure_label="target-signal-max-t5t6-by-condition",
+    )
+
+
+def build_carrier_signal_figure(
+    by_cond: dict[ConditionProperties, np.ndarray],
+) -> plt.Figure:
+    """One histogram per carrier of the per-subject MAX[O1,O2] carrier SNR."""
+    return _build_signal_by_condition_figure(
+        by_cond,
+        xlabel="MAX[O1,O2] SNR at carrier frequency",
+        suptitle="Per-subject carrier-response signal (MAX[O1,O2] SNR at carrier), by carrier",
+        figure_label="carrier-signal-max-o1o2-by-condition",
+    )
 
 
 def per_subject_between_carrier_spread(

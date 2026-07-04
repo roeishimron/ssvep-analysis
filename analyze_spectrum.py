@@ -233,6 +233,28 @@ class CarrierComparisonAnalysis:
         plt.tight_layout()
 
 
+def _min_snr_over_carriers(
+    subject: SubjectHandle,
+    latency_carriers: List[float],
+    electrodes: List[str],
+    at_carrier: bool,
+) -> float:
+    """Subject's trial-averaged SNR at the max-response electrode, min over carriers.
+
+    Per carrier, take the trial-averaged SNR under the strongest of `electrodes`
+    (not the electrode average); `at_carrier` selects the carrier-frequency SNR
+    (for V1/carrier electrodes), otherwise the 5Hz target SNR (target electrodes).
+    """
+    snrs: List[float] = []
+    for lc in latency_carriers:
+        props = ConditionProperties(np.float64(5), np.float64(lc))
+        analysis = SSVEPAnalysis(subject[props].take_channels(electrodes))
+        freq = analysis._carrier_frequency() if at_carrier else analysis._target_frequency()
+        per_channel = analysis.snr_topomap()[:, analysis._closest_index(freq)]  # (C,)
+        snrs.append(float(np.max(per_channel)))
+    return float(np.min(snrs))
+
+
 def _plot_latency_mean_vs_snr_metric(
     study: Experiment[ConditionProperties, SSVEPRecording],
     carriers: List[float],
@@ -242,12 +264,16 @@ def _plot_latency_mean_vs_snr_metric(
     metric_by_subject: Dict[str, float],
     metric_label: str,
     figure_label: str,
+    min_snr: float = 1.0,
 ) -> None:
     """Scatter plot of per-subject latency mean against an arbitrary SNR metric.
 
     `metric_by_subject` maps subject name -> x-value (e.g. SNR slope or SNR at a
     given carrier). Latencies are pooled across `latency_carriers` per subject
-    for tighter SEM. Only subjects with all required conditions are plotted.
+    for tighter SEM. Only subjects with all required conditions are plotted, and
+    subjects are excluded as low-quality when (averaged over the latency
+    carriers) their target-electrode SNR at 5Hz or their carrier-electrode SNR
+    at the carrier frequency falls below `min_snr`.
     """
     all_subjects = study.subjects()
 
@@ -261,14 +287,23 @@ def _plot_latency_mean_vs_snr_metric(
 
     metric_values: List[float] = []
     mean_values: List[float] = []
-    sd_values: List[float] = []
+    sem_values: List[float] = []
+    dropped = 0
 
     for name, metric in metric_by_subject.items():
         if name not in eligible_names:
             continue
         subject = all_subjects[name]
+
+        target_snr = _min_snr_over_carriers(subject, latency_carriers, target_electrodes, at_carrier=False)
+        carrier_snr = _min_snr_over_carriers(subject, latency_carriers, carrier_electrodes, at_carrier=True)
+        if target_snr < min_snr or carrier_snr < min_snr :
+            dropped += 1
+            continue
+
         per_carrier_means: List[float] = []
         per_carrier_sds: List[float] = []
+        total_trials = 0
         for lc in latency_carriers:
             props = ConditionProperties(np.float64(5), np.float64(lc))
             view = subject[props].take_channels(target_electrodes + carrier_electrodes)
@@ -276,13 +311,21 @@ def _plot_latency_mean_vs_snr_metric(
             per_carrier_means.append(float(mean_ms[0]))
             sd = float(sd_ms[0])
             per_carrier_sds.append(0.0 if np.isnan(sd) else sd)
+            total_trials += view.raw_data().shape[1]
 
         mean = float(np.mean(per_carrier_means))
+        # RMS of the per-carrier trial-to-trial SDs, converted to the SEM of the
+        # pooled mean via /sqrt(N_total). Exact equal-weight pooling when trial
+        # counts match across carriers; a close approximation otherwise.
         lat_sd = float(np.sqrt(np.mean(np.square(per_carrier_sds))))
+        lat_sem = lat_sd / np.sqrt(total_trials) if total_trials else 0.0
 
         metric_values.append(float(metric))
         mean_values.append(mean)
-        sd_values.append(lat_sd)
+        sem_values.append(lat_sem)
+
+    if dropped:
+        print(f"  Excluded {dropped} subject(s) with mean target or carrier SNR < {min_snr:g}.")
 
     if not metric_values:
         print(f"No matching subjects for Latency mean vs {metric_label} plot.")
@@ -290,9 +333,9 @@ def _plot_latency_mean_vs_snr_metric(
 
     fig, ax = plt.subplots(figsize=(8, 6), label=figure_label)
     ax.errorbar(
-        metric_values, mean_values, yerr=sd_values,
+        metric_values, mean_values, yerr=sem_values,
         fmt='o', color='blue', alpha=0.7, capsize=3,
-        label='mean ± sd (trial-to-trial)',
+        label='mean ± SEM (trial-to-trial)',
     )
 
     title = f"Latency mean vs. {metric_label}"
@@ -331,23 +374,25 @@ def plot_latency_mean_vs_snr_slope(
 
 def plot_latency_mean_vs_snr_at_carrier(
     study: Experiment[ConditionProperties, SSVEPRecording],
-    carriers: List[float],
     snr_carrier: float,
     latency_carriers: List[float],
     target_electrodes: List[str],
     carrier_electrodes: List[str],
 ) -> None:
-    """Scatter plot: mean processing-time vs. SNR at `snr_carrier` Hz per subject."""
-    comparison = CarrierComparisonAnalysis(study, carriers, target_electrodes)
+    """Scatter plot: mean processing-time vs. SNR at `snr_carrier` Hz per subject.
+
+    Includes every subject with the `snr_carrier` condition (and the latency
+    carriers) — unlike the slope plot, no other carriers constrain the population.
+    """
+    comparison = CarrierComparisonAnalysis(study, [snr_carrier], target_electrodes)
     data = list(comparison._get_comparison_data())
     if not data:
         print("No data for Latency mean vs SNR-at-carrier analysis.")
         return
 
-    carrier_index = comparison.carriers.index(np.float64(snr_carrier))
     _plot_latency_mean_vs_snr_metric(
-        study, carriers, latency_carriers, target_electrodes, carrier_electrodes,
-        metric_by_subject={name: snrs[carrier_index][0] for name, snrs in data},
+        study, [snr_carrier], latency_carriers, target_electrodes, carrier_electrodes,
+        metric_by_subject={name: snrs[0][0] for name, snrs in data},
         metric_label=f"SNR at {snr_carrier:g} Hz",
         figure_label=f"latency-mean-vs-snr-at-{snr_carrier:g}hz",
     )
