@@ -1,0 +1,212 @@
+[
+  [
+    {
+      "steady_state_quantas": 8,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 2.8489886698651485
+    },
+    {
+      "steady_state_quantas": 8,
+      "attention_color": -1,
+      "coherent_color": 1,
+      "coherent_direction": 0.8640803425910394
+    },
+    {
+      "steady_state_quantas": 7,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 6.124426511367516
+    },
+    {
+      "steady_state_quantas": 5,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 3.818904045894347
+    },
+    {
+      "steady_state_quantas": 7,
+      "attention_color": 1,
+      "coherent_color": 1,
+      "coherent_direction": 3.983649628189364
+    },
+    {
+      "steady_state_quantas": 3,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 1.9803930265459928
+    },
+    {
+      "steady_state_quantas": 7,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 6.1375544445391235
+    },
+    {
+      "steady_state_quantas": 5,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 3.3672560674406875
+    }
+  ],
+  [
+    {
+      "steady_state_quantas": 8,
+      "attention_color": -1,
+      "coherent_color": 1,
+      "coherent_direction": 6.011175105334526
+    },
+    {
+      "steady_state_quantas": 4,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 1.9168028299741438
+    },
+    {
+      "steady_state_quantas": 1,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 4.770479334293165
+    },
+    {
+      "steady_state_quantas": 7,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 6.201782023763519
+    },
+    {
+      "steady_state_quantas": 5,
+      "attention_color": 1,
+      "coherent_color": 1,
+      "coherent_direction": 4.565973557787726
+    },
+    {
+      "steady_state_quantas": 1,
+      "attention_color": -1,
+      "coherent_color": 1,
+      "coherent_direction": 0.25544538757026286
+    },
+    {
+      "steady_state_quantas": 7,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 2.540062719228218
+    },
+    {
+      "steady_state_quantas": 8,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 4.459196230998914
+    },
+    {
+      "steady_state_quantas": 6,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 6.161353260920624
+    },
+    {
+      "steady_state_quantas": 1,
+      "attention_color": 1,
+      "coherent_color": 1,
+      "coherent_direction": 1.0575388975484559
+    },
+    {
+      "steady_state_quantas": 1,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 5.830966770163739
+    },
+    {
+      "steady_state_quantas": 1,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 5.358785290817233
+    }
+  ],
+  [
+    {
+      "steady_state_quantas": 1,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 0.9876580570655807
+    },
+    {
+      "steady_state_quantas": 6,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 1.8164587257423324
+    },
+    {
+      "steady_state_quantas": 3,
+      "attention_color": -1,
+      "coherent_color": 1,
+      "coherent_direction": 0.8459459128824462
+    },
+    {
+      "steady_state_quantas": 1,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 5.037044543137433
+    },
+    {
+      "steady_state_quantas": 4,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 1.054158129756004
+    },
+    {
+      "steady_state_quantas": 6,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 5.096868974056503
+    },
+    {
+      "steady_state_quantas": 2,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 3.6624431908042765
+    },
+    {
+      "steady_state_quantas": 1,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 5.1964969841639785
+    },
+    {
+      "steady_state_quantas": 2,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 3.1407858499684798
+    },
+    {
+      "steady_state_quantas": 7,
+      "attention_color": -1,
+      "coherent_color": -1,
+      "coherent_direction": 4.26021716778559
+    },
+    {
+      "steady_state_quantas": 2,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 5.001146707330356
+    },
+    {
+      "steady_state_quantas": 3,
+      "attention_color": 1,
+      "coherent_color": -1,
+      "coherent_direction": 3.5551451314720466
+    },
+    {
+      "steady_state_quantas": 8,
+      "attention_color": -1,
+      "coherent_color": 1,
+      "coherent_direction": 0.24799858547874146
+    },
+    {
+      "steady_state_quantas": 4,
+      "attention_color": 1,
+      "coherent_color": 1,
+      "coherent_direction": 6.180451031187435
+    }
+  ]
+]

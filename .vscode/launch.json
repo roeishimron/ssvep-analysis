@@ -9,7 +9,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
-            "args": ["experiments_hebrew_vs_mirror"],
+            "args": ["data/hebrew_vs_mirror"],
             "console": "integratedTerminal"
         }
     ]

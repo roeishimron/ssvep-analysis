@@ -223,7 +223,8 @@ class Spectral:
         snr_avg_trial = snr_target.mean(axis=1)           # (S, C)
         best_channel = np.argmax(snr_avg_trial, axis=-1)  # (S,)
 
-        if snr_avg_trial[0, best_channel] < 2:
+        best_snr = snr_avg_trial[np.arange(snr_avg_trial.shape[0]), best_channel]
+        if np.any(best_snr < 2):
             print("Analyzing improper trial, SNR is less then 2")
 
         fourier = self._fourier_cache  # (S, T, C, W, F)
@@ -372,3 +373,17 @@ class SSVEPAnalysis(Spectral):
         )
         best_dt = np.take_along_axis(distances, best_idx, axis=-1).squeeze(-1)
         return best_dt
+
+    @staticmethod
+    def _resolve_to_seconds(
+        distances, T_target: float, expected_s: float = 0.05,
+    ) -> "Array1D_f64":
+        """Select the best candidate and convert phasor angle to seconds.
+
+        Thin composition of _choose_best_distances with the angle→latency
+        conversion: τ = angle(z) * T_target / (2π).
+        """
+        best_dt = SSVEPAnalysis._choose_best_distances(
+            distances, T_target, expected_s=expected_s,
+        )
+        return (np.angle(best_dt) * T_target / (2 * np.pi)).astype(np.float64)
