@@ -30,6 +30,7 @@ class ConditionBlob(Generic[K]):
         props: K,
         raw_info: mne.Info,
         subjects: List["Subject[K]"],
+        bad_channels: np.ndarray | None = None,
     ) -> None:
         if raw_data.ndim != 4:
             raise ValueError(
@@ -46,6 +47,15 @@ class ConditionBlob(Generic[K]):
         self.props: K = props
         self.raw_info = raw_info
         self.subjects = subjects
+        # (Subject, Channel) bool: channels flagged bad per subject at load time.
+        if bad_channels is None:
+            bad_channels = np.zeros(raw_data.shape[[0, 2][0]:3:2], dtype=bool)
+        if bad_channels.shape != (raw_data.shape[0], raw_data.shape[2]):
+            raise ValueError(
+                f"bad_channels must be (Subject, Channel) = "
+                f"{(raw_data.shape[0], raw_data.shape[2])}, got {bad_channels.shape}"
+            )
+        self.bad_channels = bad_channels.astype(bool)
 
     @property
     def n_subjects(self) -> int:
@@ -127,6 +137,13 @@ class ConditionView(Generic[K]):
     def props(self) -> K:
         return self.blob.props
 
+    def bad_channels(self) -> np.ndarray:
+        """(Subject, Channel) bool mask of channels flagged bad, for the active channels."""
+        bad = self.blob.bad_channels[:, self.channel_indices]
+        if self.subject_idx is None:
+            return bad
+        return bad[self.subject_idx : self.subject_idx + 1]
+
     # --- MNERecording[K] ---
     def mne_info(self) -> mne.Info:
         # Restrict the info to the active channel subset so topomaps line up.
@@ -202,8 +219,10 @@ class Study(Generic[K], Experiment[K, ConditionView[K]]):
         self._subjects_by_name: Dict[str, Subject[K]] = {}
         self._next_id = 0
 
-        # Buffer raw time-domain data per (condition_key, subject_name).
+        # Buffer raw time-domain data per (condition_key, subject_name), with
+        # each recording's bad-channel mask (from info["bads"]).
         buffer: Dict[K, Dict[str, List[np.ndarray]]] = {}
+        bads: Dict[K, Dict[str, np.ndarray]] = {}
         infos: Dict[K, mne.Info] = {}
         rates: Dict[K, float] = {}
 
@@ -214,10 +233,16 @@ class Study(Generic[K], Experiment[K, ConditionView[K]]):
 
             if props not in buffer:
                 buffer[props] = {}
-                infos[props] = info
+                bads[props] = {}
+                condition_info = info.copy()
+                condition_info["bads"] = []
+                infos[props] = condition_info
                 rates[props] = sample_rate
 
+            data = self._align_channels(data, info.ch_names, infos[props].ch_names, name, props)
+            bad = np.isin(infos[props].ch_names, list(info.get("bads", [])))
             buffer[props].setdefault(name, []).append(data)
+            bads[props][name] = bads[props].get(name, np.zeros_like(bad)) | bad
 
         self._blobs: Dict[K, ConditionBlob[K]] = {}
         self._group_views: Dict[K, ConditionView[K]] = {}
@@ -227,6 +252,7 @@ class Study(Generic[K], Experiment[K, ConditionView[K]]):
             subject_handles = [self._subjects_by_name[n] for n in sorted_names]
 
             subject_trial_data: List[np.ndarray] = []
+            truncated: List[str] = []
             for name in sorted_names:
                 # Concatenate this subject's recordings along the trial axis.
                 # Each recording has shape (1, T_i, C, Time); strip the leading
@@ -241,11 +267,20 @@ class Study(Generic[K], Experiment[K, ConditionView[K]]):
                         f"which is less than the minimum required ({min_trials})."
                     )
                     sys.exit(1)
+                if n_trials > min_trials:
+                    truncated.append(f"{name} ({n_trials})")
 
                 subject_trial_data.append(combined[:min_trials])
 
+            if truncated:
+                print(f"{props}: keeping the first {min_trials} trials of "
+                      f"{len(truncated)} subject(s) with more: {', '.join(truncated)}")
+
             blob_data: RawStudyData = np.stack(subject_trial_data, axis=0).astype(np.float64)
-            blob = ConditionBlob(blob_data, rates[props], props, infos[props], subject_handles)
+            bad_mask = np.stack([bads[props][n] for n in sorted_names], axis=0)
+            blob = ConditionBlob(
+                blob_data, rates[props], props, infos[props], subject_handles, bad_mask,
+            )
             self._blobs[props] = blob
 
             self._group_views[props] = ConditionView(blob)
@@ -259,6 +294,26 @@ class Study(Generic[K], Experiment[K, ConditionView[K]]):
         self._subjects_by_name = {
             n: self._subjects_by_name[n] for n in sorted(self._subjects_by_name.keys())
         }
+
+    @staticmethod
+    def _align_channels(
+        data: np.ndarray, names: List[str], reference_names: List[str], subject: str, props: K,
+    ) -> np.ndarray:
+        """Return `data` (1, T, C, Time) with channels in `reference_names` order.
+
+        Subjects are stacked by channel index, so every recording of a condition
+        must carry the same channel names. A different order is re-indexed; a
+        different set is an error.
+        """
+        names = list(names)
+        if names == list(reference_names):
+            return data
+        if sorted(names) != sorted(reference_names):
+            raise ValueError(
+                f"Subject '{subject}' in {props} has channels {names}, "
+                f"expected {list(reference_names)}"
+            )
+        return data[:, :, [names.index(n) for n in reference_names], :]
 
     # --- Experiment[K, ConditionView[K]] ---
     def subjects(self) -> Dict[str, Subject[K]]:
@@ -282,9 +337,10 @@ class Study(Generic[K], Experiment[K, ConditionView[K]]):
 
         s, t, c, time = blob.raw_data.shape
         flat: RawStudyData = blob.raw_data.reshape(1, s * t, c, time).astype(np.float64)
+        # A channel bad in any subject is marked bad in the aggregate.
         new_blob: ConditionBlob[K] = ConditionBlob(
             flat, blob.sample_rate, blob.props, blob.raw_info,
-            [Subject(-1, "Aggregate")],
+            [Subject(-1, "Aggregate")], blob.bad_channels.any(axis=0, keepdims=True),
         )
         label = f"Aggregate({blob.props})"
         return ConditionView(new_blob, name=label)

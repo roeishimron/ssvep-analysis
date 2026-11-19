@@ -6,7 +6,10 @@ from scipy.stats import pearsonr
 
 import mne
 
-from analysis import SSVEPAnalysis, Spectral
+from analysis import (
+    ExistenceResult, FrequencyTagging, SSVEPAnalysis, Spectral, is_carrier_harmonic,
+    oddball_harmonics,
+)
 from core_types import Array1D_f64, ConditionProperties, SubjectPower
 from interfaces import Experiment, Recording, SSVEPRecording, SubjectHandle, TopomapSSVEPRecording
 
@@ -26,19 +29,20 @@ def analyze_spectrum(
             1, 1, figsize=(8, 3),
             label=f"{rec.name()}-{rec.props().carrier_frequency}-amplitudes",
         )
-        amplitudes_mean, amplitudes_std = analysis.power_spectrum()
-        amp_ax.plot(freqs, 20 * np.log10(amplitudes_mean))
+        # Power of the window-averaged spectrum, in (data units)^2 = uV^2.
+        power_mean, power_sem = analysis.power_spectrum()
+        amp_ax.plot(freqs, 10 * np.log10(power_mean))
         # Floor the lower edge before log10 so we never feed it 0 or negatives —
         # protects matplot2tikz's pgfplots output from "Dimension too large".
-        amp_low = np.maximum(amplitudes_mean - amplitudes_std, 1e-6)
+        power_low = np.maximum(power_mean - power_sem, 1e-12)
         amp_ax.fill_between(
-            freqs, 20 * np.log10(amp_low),
-            20 * np.log10(amplitudes_mean + amplitudes_std),
+            freqs, 10 * np.log10(power_low),
+            10 * np.log10(power_mean + power_sem),
             color="r", alpha=0.1,
         )
         amp_ax.set(
-            title="Amplitudes spectrum",
-            ylabel=r"Amplitude (dB$\mu$V)",
+            title="Power spectrum (2 s windows, coherent average; mean $\\pm$ SEM)",
+            ylabel=r"Power (dB re 1 $\mu$V$^2$)",
             xlabel='$\\downarrow$ SNR calculation $\\downarrow$',
             xlim=[fmin, fmax],
         )
@@ -55,8 +59,8 @@ def analyze_spectrum(
         color="r", alpha=0.1,
     )
     ax.set(
-        title="SNR",
-        ylabel="SNR",
+        title="Power SNR (2 s windows, 3 neighbours per side; mean $\\pm$ SEM)",
+        ylabel="Power SNR",
         xlabel="Frequency [Hz]",
         xlim=[fmin, fmax],
         ylim=[0, snr_ymax],
@@ -104,14 +108,15 @@ def plot_snrs(rec: TopomapSSVEPRecording) -> None:
     info = rec.mne_info()
     im = None
     for ((freq, channel_average), ax) in zip(freqs_with_channel_averages, axs.flatten()):
-        print(f"looking at freq {freq:.2f}")
-        ax.set_title(f"{freq:.0f} Hz")
+        # A harmonic of the oddball that is also a multiple of this condition's
+        # carrier shows the carrier response, not an oddball response.
+        ax.set_title(f"{freq:.0f} Hz" + (" (carrier)" if is_carrier_harmonic(freq, carrier_freq) else ""))
         im, _ = mne.viz.plot_topomap(
             channel_average, info, vlim=(1, upper_limit), axes=ax, show=False,
         )
 
     if im is not None:
-        fig.colorbar(im, ax=axs[-1], shrink=1.0, fraction=0.08, pad=0.05, label="SNR")
+        fig.colorbar(im, ax=axs[-1], shrink=1.0, fraction=0.08, pad=0.05, label="Power SNR (2 s windows)")
 
 
 def plot_snr_comparison(
@@ -142,10 +147,10 @@ def plot_snr_comparison(
     x = np.arange(len(labels))
 
     ax.bar(x, snr_means, yerr=snr_sems, capsize=5, color='skyblue', edgecolor='navy')
-    ax.set_ylabel("SNR")
+    ax.set_ylabel("Power SNR at the target frequency (2 s windows)")
     ax.set_title(
-        f"SNR at Target Frequency over {electrode_names}\n"
-        r"(Mean $\pm$ SEM across subjects)"
+        f"Power SNR at Target Frequency over {electrode_names}\n"
+        r"(Mean $\pm$ SEM across subjects; legacy measure)"
     )
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.axhline(1, color='red', linestyle='--', alpha=0.5, label="Noise Floor")
@@ -223,7 +228,8 @@ class CarrierComparisonAnalysis:
 
         ax.set_xticks(x)
         ax.set_xticklabels([f"{c} Hz" for c in self.carriers])
-        ax.set_ylabel("SNR at Carrier Frequency")
+        # The value is the SNR at the 5 Hz target, measured in each carrier condition.
+        ax.set_ylabel("Power SNR at 5 Hz (2 s windows)")
         ax.set_title(
             f"Subject-wise SNR Comparison across Carriers\n(Electrodes: {self.electrode_names})"
         )
@@ -431,3 +437,149 @@ def plot_snr_spectra_overlay(
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     ax.legend()
     plt.tight_layout()
+
+
+# --- Full-length spectrum (FrequencyTagging): the default reported measures ---
+# Fixed regions of interest, chosen in advance; no per-subject channel selection.
+ODDBALL_ROI = ["T5", "T6"]
+CARRIER_ROI = ["O1", "O2"]
+
+
+def _by_carrier(experiment: Experiment[ConditionProperties, SSVEPRecording]):
+    return sorted(experiment.conditions().items(), key=lambda kv: float(kv[0].carrier_frequency))
+
+
+def report_bad_channels(records: List[dict]) -> str:
+    """Summary of the loader's per-recording bad-channel screen (StudyLoader.records)."""
+    counts: Dict[str, int] = {}
+    for r in records:
+        for c in r["bads"]:
+            counts[c] = counts.get(c, 0) + 1
+    n_bad = [len(r["bads"]) for r in records]
+    if not records:
+        return "No recordings."
+    roi = [f"{r['label']}: {[c for c in r['bads'] if c in ODDBALL_ROI + CARRIER_ROI]}"
+           for r in records if any(c in ODDBALL_ROI + CARRIER_ROI for c in r["bads"])]
+    lines = [
+        f"Bad-channel screen: {len(records)} recordings, {sum(n > 0 for n in n_bad)} with at least one "
+        f"bad channel (mean {np.mean(n_bad):.2f}, max {max(n_bad)} per recording)",
+        "  by channel: " + ", ".join(f"{c} {n}" for c, n in sorted(counts.items(), key=lambda kv: -kv[1])),
+        "  recordings with a bad ROI channel: " + ("; ".join(roi) if roi else "none"),
+    ]
+    trials = [r for r in records if r.get("n_bursts", r["n_used"]) != r["n_used"]]
+    lines.append("Trigger bursts not used (bursts / complete / used): " + (
+        "; ".join(f"{r['label']}: {r.get('n_bursts')}/{r['n_complete']}/{r['n_used']}" for r in trials)
+        if trials else "none"))
+    return "\n".join(lines)
+
+
+def format_existence(label: str, r: ExistenceResult) -> str:
+    det = "  ".join(f"z>{th:g}: {n}/{r.n}" for th, n in r.detected.items())
+    excl = f" ({r.n_excluded} excluded: ROI all bad)" if r.n_excluded else ""
+    return (f"{label:22s} n={r.n}{excl}  BCA {r.mean_bca:.3f} uV (sd {r.sd_bca:.3f}, d={r.cohen_d:.2f})  "
+            f"t={r.t:.2f} p={r.p_t:.2g}  Wilcoxon p={r.p_wilcoxon:.2g}  |  {det}  |  "
+            f"grand-average z={r.grand_z:.1f} SNR={r.grand_snr:.2f}  noise {r.mean_noise:.3f} uV")
+
+
+def existence_report(
+    experiment: Experiment[ConditionProperties, SSVEPRecording],
+    roi: List[str] = ODDBALL_ROI,
+    at_carrier: bool = False,
+) -> Dict[ConditionProperties, ExistenceResult]:
+    """Existence statistics per condition at the oddball (or carrier) frequency over a fixed ROI."""
+    out: Dict[ConditionProperties, ExistenceResult] = {}
+    for props, view in _by_carrier(experiment):
+        freq = float(props.carrier_frequency if at_carrier else props.target_frequency)
+        out[props] = FrequencyTagging(view.take_channels(roi)).existence(freq)
+        print(format_existence(
+            f"{props.carrier_frequency:g} Hz stream, {freq:g} Hz", out[props]))
+    return out
+
+
+def harmonic_report(
+    experiment: Experiment[ConditionProperties, SSVEPRecording],
+    roi: List[str] = ODDBALL_ROI,
+    fmax: float = 35.0,
+    z_min: float = 1.64,
+) -> Dict[ConditionProperties, List[float]]:
+    """Grand-average z at each oddball harmonic; carrier harmonics are labelled, not measured
+    as oddball responses. Returns the clean harmonics with grand-average z > z_min per
+    condition, and prints the summed BCA over them."""
+    significant: Dict[ConditionProperties, List[float]] = {}
+    for props, view in _by_carrier(experiment):
+        ft = FrequencyTagging(view.take_channels(roi))
+        cells, sig = [], []
+        for f, clean in oddball_harmonics(float(props.target_frequency),
+                                          float(props.carrier_frequency), fmax):
+            z = ft.grand_average_at(f)["z"]
+            cells.append(f"{f:g}:{z:.1f}" + ("" if clean else "(carrier)"))
+            if clean and z > z_min:
+                sig.append(f)
+        significant[props] = sig
+        summed = ft.summed_at(sig)["bca"] if sig else np.array([np.nan])
+        print(f"{props.carrier_frequency:g} Hz stream: grand-average z by harmonic  " + "  ".join(cells))
+        print(f"   summed BCA over clean harmonics with z>{z_min:g} {sig}: "
+              f"mean {np.nanmean(summed):.3f} uV")
+    return significant
+
+
+def plot_bca_topomaps(
+    experiment: Experiment[ConditionProperties, TopomapSSVEPRecording],
+) -> None:
+    """Group-mean BCA per channel at the oddball and at the carrier frequency, per condition.
+
+    Earclips are not shown. Pz is not shown either: it is the recording
+    reference, so its value is minus the reference average, not a measured site.
+    """
+    conds = _by_carrier(experiment)
+    fig, axs = plt.subplots(2, len(conds), figsize=(3.6 * len(conds), 6.5),
+                            squeeze=False, label="bca-topomaps")
+    for j, (props, view) in enumerate(conds):
+        names = [n for n in view.channel_names() if n not in ("A1", "A2", "Pz")]
+        sub = view.take_channels(names)
+        ft = FrequencyTagging(sub)
+        for i, freq in enumerate((float(props.target_frequency), float(props.carrier_frequency))):
+            bca = np.nanmean(ft.channel_measures_at(freq)["bca"], axis=0)     # (C,)
+            ax = axs[i, j]
+            vlim = (min(0.0, float(np.nanmin(bca))), float(np.nanmax(bca)))
+            im, _ = mne.viz.plot_topomap(bca, sub.mne_info(), axes=ax, show=False,
+                                         cmap="viridis", contours=0, vlim=vlim)
+            kind = "oddball" if i == 0 else "carrier"
+            ax.set_title(f"{props.carrier_frequency:g} Hz stream: {freq:g} Hz ({kind})", fontsize=9)
+            fig.colorbar(im, ax=ax, shrink=0.6, label=r"BCA ($\mu$V)")
+    fig.suptitle("Group-mean baseline-corrected amplitude (56 s FFT, screened average reference)",
+                 fontsize=10)
+    fig.tight_layout()
+
+
+def plot_amplitude_snr_spectra(
+    experiment: Experiment[ConditionProperties, SSVEPRecording],
+    roi: List[str] = ODDBALL_ROI,
+    fmin: float = 1.0,
+    fmax: float = 37.0,
+) -> None:
+    """Amplitude SNR of the grand-average ROI spectrum, one panel per condition.
+
+    Red lines: clean oddball harmonics. Blue lines: carrier and its multiples.
+    """
+    conds = _by_carrier(experiment)
+    fig, axs = plt.subplots(1, len(conds), figsize=(3.8 * len(conds), 3.2), sharey=True,
+                            squeeze=False, label="amplitude-snr-spectra")
+    for ax, (props, view) in zip(axs[0], conds):
+        ft = FrequencyTagging(view.take_channels(roi))
+        roi_spec = ft.roi_spectrum()
+        grand = roi_spec[~np.isnan(roi_spec[:, 0])].mean(axis=0)
+        freqs = ft.frequencies()
+        edge = int(np.max(np.abs(ft.offsets)))
+        k = np.arange(edge, len(freqs) - edge)
+        snr = grand[k] / grand[k[:, None] + ft.offsets].mean(axis=1)
+        ax.plot(freqs[k], snr, lw=0.6, color="0.3")
+        for f, clean in oddball_harmonics(float(props.target_frequency),
+                                          float(props.carrier_frequency), fmax):
+            ax.axvline(f, color="tab:red" if clean else "tab:blue", lw=1.0, alpha=0.4, zorder=0)
+        ax.set_xlim(fmin, fmax)
+        ax.set_title(f"{props.carrier_frequency:g} Hz stream (n={len(roi_spec)})", fontsize=9)
+        ax.set_xlabel("Frequency [Hz]")
+    axs[0, 0].set_ylabel(f"Amplitude SNR, {'+'.join(roi)} grand average")
+    fig.suptitle("Red: clean oddball harmonics. Blue: carrier and its multiples", fontsize=9)
+    fig.tight_layout()

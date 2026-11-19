@@ -1,7 +1,12 @@
 """Analysis classes and protocol-plumbing helpers.
 
-Two analysis classes:
-- Spectral(rec): FFT-cached spectral analysis on any Recording.
+Analysis classes:
+- FrequencyTagging(rec): the default response measure. One FFT per trial over
+  the whole epoch (use StudyLoader.SPECTRUM_EPOCH_S: 56 s, 1/56 Hz bins),
+  amplitude averaged over trials, each bin compared with 20 neighbouring bins:
+  baseline-corrected amplitude (BCA), z and amplitude SNR. Bad channels are NaN.
+- Spectral(rec): legacy 2 s-window power SNR (coherent average over windows,
+  3 neighbours per side). Kept for comparison and for the latency code.
 - SSVEPAnalysis(rec): adds target/carrier convenience + neural-processing-time
   (phase ambiguity resolution) for SSVEPRecording inputs.
 
@@ -12,11 +17,13 @@ Also exports:
   defaults.
 """
 
-from typing import Generic, Hashable, List, Sequence, Tuple, TypeVar
+from dataclasses import dataclass
+from typing import Dict, Generic, Hashable, List, Sequence, Tuple, TypeVar
 
 import numpy as np
+from scipy.signal import detrend
 from scipy.signal.windows import kaiser
-from scipy.stats import circmean, circstd, sem
+from scipy.stats import circmean, circstd, sem, ttest_1samp, wilcoxon
 
 from core_types import (
     Array1D_c64, Array1D_f64, ConditionPhases, RawStudyData,
@@ -44,12 +51,17 @@ class RawRecording(Generic[K]):
         sample_rate: float,
         channel_names: List[str],
         props: K,
+        bad_channels: "np.ndarray | None" = None,
     ) -> None:
         self._name = name
         self._raw_data = raw_data
         self._sample_rate = sample_rate
         self._channel_names = list(channel_names)
         self._props = props
+        self._bad = (
+            np.zeros((raw_data.shape[0], raw_data.shape[2]), dtype=bool)
+            if bad_channels is None else np.asarray(bad_channels, dtype=bool)
+        )
 
     def name(self) -> str:
         return self._name
@@ -72,10 +84,14 @@ class RawRecording(Generic[K]):
             sample_rate=self._sample_rate,
             channel_names=[self._channel_names[i] for i in indices],
             props=self._props,
+            bad_channels=self._bad[:, indices],
         )
 
     def props(self) -> K:
         return self._props
+
+    def bad_channels(self) -> np.ndarray:
+        return self._bad
 
 
 def combine_subject_recordings(
@@ -101,6 +117,7 @@ def combine_subject_recordings(
         sample_rate=first.sample_rate(),
         channel_names=first.channel_names(),
         props=first.props(),
+        bad_channels=np.concatenate([r.bad_channels() for r in recordings], axis=0),
     )
 
 
@@ -115,6 +132,7 @@ def flatten_subject_axis(rec: Recording[K]) -> RawRecording[K]:
         sample_rate=rec.sample_rate(),
         channel_names=rec.channel_names(),
         props=rec.props(),
+        bad_channels=rec.bad_channels().any(axis=0, keepdims=True),
     )
 
 
@@ -387,3 +405,185 @@ class SSVEPAnalysis(Spectral):
             distances, T_target, expected_s=expected_s,
         )
         return (np.angle(best_dt) * T_target / (2 * np.pi)).astype(np.float64)
+
+
+# --- Full-length spectrum: the default response measure ----------------------
+
+def is_carrier_harmonic(frequency: float, carrier: float) -> bool:
+    """True if `frequency` is a multiple of the carrier, so the carrier response
+    contaminates it. Decided per condition, with that condition's own carrier."""
+    ratio = frequency / carrier
+    return abs(ratio - round(ratio)) < 1e-6
+
+
+def oddball_harmonics(
+    target: float, carrier: float, fmax: float,
+) -> List[Tuple[float, bool]]:
+    """[(frequency, clean)] for the oddball harmonics target*h <= fmax.
+
+    `clean` is False where the harmonic is also a carrier harmonic
+    (e.g. 10 and 20 Hz in the 10 Hz condition, 15 and 30 Hz at 15 Hz).
+    """
+    n = int(np.floor(fmax / target + 1e-9))
+    return [(target * h, not is_carrier_harmonic(target * h, carrier))
+            for h in range(1, n + 1)]
+
+
+def neighbour_offsets(n_neighbors: int = 10, n_skip: int = 1) -> np.ndarray:
+    """Bin offsets of the noise neighbours: n_neighbors per side, n_skip adjacent bins skipped."""
+    return np.r_[-(n_skip + n_neighbors):-n_skip, n_skip + 1:n_skip + n_neighbors + 1]
+
+
+def bin_measures(
+    spectrum: np.ndarray, k: int, offsets: np.ndarray,
+) -> Dict[str, np.ndarray]:
+    """Measures at bin k of amplitude spectra (..., F) against the neighbour bins.
+
+    amp: amplitude at k; noise: mean of the neighbours; bca: amp - noise
+    (baseline-corrected amplitude); z: bca / SD of the neighbours; snr: amp / noise.
+    """
+    nb = spectrum[..., k + offsets]
+    noise = nb.mean(-1)
+    sd = nb.std(-1, ddof=1)
+    amp = spectrum[..., k]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return dict(amp=amp, noise=noise, bca=amp - noise, z=(amp - noise) / sd,
+                    snr=amp / noise)
+
+
+@dataclass
+class ExistenceResult:
+    """Group test of a response at one frequency (see FrequencyTagging.existence)."""
+    frequency: float
+    n: int                    # subjects with at least one good channel in the recording
+    n_excluded: int           # subjects with every channel of the recording bad
+    mean_bca: float           # microvolts
+    sd_bca: float
+    cohen_d: float
+    t: float
+    p_t: float                # one-sample t-test of BCA against 0
+    p_wilcoxon: float         # Wilcoxon signed-rank test of BCA against 0
+    detected: Dict[float, int]  # z threshold -> subjects above it
+    grand_z: float            # z on the grand-average spectrum
+    grand_snr: float
+    mean_noise: float         # microvolts
+    median_snr: float
+
+
+class FrequencyTagging:
+    """Full-length amplitude spectrum of a Recording, in its data units (microvolts).
+
+    One FFT per trial over the whole epoch (linear detrend, rectangular window,
+    amplitude scaling 2/N), amplitude spectra averaged over trials. For the
+    56 s epoch of StudyLoader.SPECTRUM_EPOCH_S the resolution is 1/56 Hz, so
+    5 Hz and its harmonics fall on bins. Channels flagged bad in the recording
+    are NaN and drop out of channel averages.
+
+    Restrict the channels first and the analysis averages over all of them:
+        FrequencyTagging(view.take_channels(["T5", "T6"])).existence(5.0)
+    """
+
+    Z_THRESHOLDS = (1.64, 3.1)
+
+    def __init__(
+        self, rec: Recording, *, n_neighbors: int = 10, n_skip: int = 1,
+        fmax: float | None = 60.0,
+    ) -> None:
+        self.rec = rec
+        self.offsets = neighbour_offsets(n_neighbors, n_skip)
+        data = rec.raw_data()                                  # (S, T, C, N)
+        self.n_samples = data.shape[-1]
+        freqs = np.fft.rfftfreq(self.n_samples, d=1 / rec.sample_rate())
+        n_freqs = len(freqs) if fmax is None else int(np.searchsorted(freqs, fmax, "right"))
+        self._freqs: Array1D_f64 = freqs[:n_freqs].astype(np.float64)
+
+        amp = np.empty(data.shape[:3] + (n_freqs,), dtype=np.float64)
+        for s in range(data.shape[0]):                         # per subject: bounded memory
+            y = detrend(data[s], axis=-1)
+            amp[s] = np.abs(np.fft.rfft(y, axis=-1)[..., :n_freqs]) * 2 / self.n_samples
+        amp = amp.mean(axis=1)                                 # (S, C, F)
+        amp[np.asarray(rec.bad_channels(), dtype=bool)] = np.nan
+        self._amplitude = amp
+
+    # --- spectra ---
+    def frequencies(self) -> Array1D_f64:
+        return self._freqs
+
+    def amplitude(self) -> np.ndarray:
+        """(Subject, Channel, Frequency) trial-averaged amplitude; bad channels NaN."""
+        return self._amplitude
+
+    def roi_spectrum(self) -> np.ndarray:
+        """(Subject, Frequency): mean over the good channels of the recording.
+
+        A subject whose channels are all bad is a NaN row.
+        """
+        amp = self._amplitude
+        good = ~np.isnan(amp[..., 0])                          # (S, C)
+        total = np.where(np.isnan(amp), 0.0, amp).sum(axis=1)
+        count = good.sum(axis=1)[:, np.newaxis]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(count > 0, total / count, np.nan)
+
+    def bin_index(self, frequency: float) -> int:
+        k = int(np.argmin(np.abs(self._freqs - frequency)))
+        if abs(self._freqs[k] - frequency) > 1e-6:
+            raise ValueError(
+                f"{frequency} Hz is not on a bin of this {self.n_samples}-sample "
+                f"spectrum (nearest {self._freqs[k]:.4f} Hz); use an epoch whose "
+                f"length is a whole number of cycles"
+            )
+        return k
+
+    # --- measures ---
+    def channel_measures_at(self, frequency: float) -> Dict[str, np.ndarray]:
+        """Per subject and channel, (S, C) arrays of amp/noise/bca/z/snr."""
+        return bin_measures(self._amplitude, self.bin_index(frequency), self.offsets)
+
+    def measures_at(self, frequency: float) -> Dict[str, np.ndarray]:
+        """Per subject, (S,) arrays of amp/noise/bca/z/snr on the channel-average spectrum."""
+        return bin_measures(self.roi_spectrum(), self.bin_index(frequency), self.offsets)
+
+    def grand_average_at(self, frequency: float) -> Dict[str, float]:
+        """Measures on the grand-average spectrum (mean over subjects with data)."""
+        roi = self.roi_spectrum()
+        grand = roi[~np.isnan(roi[:, 0])].mean(axis=0)
+        return {k: float(v) for k, v in
+                bin_measures(grand, self.bin_index(frequency), self.offsets).items()}
+
+    def summed_at(self, frequencies: Sequence[float]) -> Dict[str, np.ndarray]:
+        """Per subject BCA and z of the response summed over `frequencies`.
+
+        Spectrum segments centred on each frequency are summed, then measured
+        at the centre against the summed neighbours.
+        """
+        roi = self.roi_spectrum()
+        half = int(np.max(np.abs(self.offsets)))
+        idx = np.arange(-half, half + 1)
+        seg = sum(roi[:, self.bin_index(f) + idx] for f in frequencies)
+        m = bin_measures(seg, half, self.offsets)
+        return dict(bca=m["bca"], z=m["z"])
+
+    def existence(self, frequency: float) -> ExistenceResult:
+        """Is there a response at `frequency`? Group and individual statistics.
+
+        Group: z on the grand-average spectrum; one-sample t-test and Wilcoxon
+        signed-rank test of BCA across subjects. Individual: number of subjects
+        with z above each of Z_THRESHOLDS (one-sided p < .05 and < .001).
+        """
+        m = self.measures_at(frequency)
+        ok = ~np.isnan(m["bca"])
+        bca, z = m["bca"][ok], m["z"][ok]
+        n = int(ok.sum())
+        sd = float(bca.std(ddof=1)) if n > 1 else float("nan")
+        t, p_t = ttest_1samp(bca, 0.0) if n > 1 else (float("nan"), float("nan"))
+        p_w = float(wilcoxon(bca).pvalue) if n > 0 else float("nan")
+        grand = self.grand_average_at(frequency)
+        return ExistenceResult(
+            frequency=float(frequency), n=n, n_excluded=int((~ok).sum()),
+            mean_bca=float(bca.mean()), sd_bca=sd, cohen_d=float(bca.mean()) / sd,
+            t=float(t), p_t=float(p_t), p_wilcoxon=p_w,
+            detected={th: int(np.sum(z > th)) for th in self.Z_THRESHOLDS},
+            grand_z=grand["z"], grand_snr=grand["snr"],
+            mean_noise=float(m["noise"][ok].mean()), median_snr=float(np.median(m["snr"][ok])),
+        )

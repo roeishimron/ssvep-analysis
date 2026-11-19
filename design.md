@@ -19,12 +19,12 @@ The primary data container for a single experimental condition.
 ## 2. Data Ingestion: `StudyLoader`
 
 Responsible for filesystem traversal and initial signal processing.
-- **FS Pattern**: Scans folders like `10hz_2ob_60s` and parses `.edf` files.
-- **Processing**: Performs non-overlapping sliding window `rfft` to produce `complex64` components.
-- **Output**: Returns an `Iterator[Tuple[str, ConditionProperties, mne.Info, SubjectData]]`.
-    - `str`: Subject name.
-    - `ConditionProperties`: Parsed from folder context.
-    - `SubjectData`: 4D array `(Trial, Electrode, Window, Frequency)`.
+- **FS Pattern**: Scans folders like `10hz_2ob_60s` and parses `.edf` files directly inside them (subfolders such as `bads` are ignored).
+- **Subject identity**: Files are grouped into recording sessions by EDF `meas_date` (`group_sessions`: a new session when the gap to the previous file exceeds 60 min or the condition is already present). Subjects are named by pseudonymous session IDs `P01, P02, ...` in chronological order. File names (participants' names) are never used as identities or printed.
+- **Trials**: The last event of each trigger burst (`mask=8`) marks a stream; only complete streams are kept and the first `n_trials` (3) are used. Burst, detected, complete and used counts are logged per file and kept in `loader.records`.
+- **Bad channels and reference**: Channels are screened per recording on 4.5-60.5 s after the trigger, against Pz (flat, or 1 Hz high-passed log SD above the scalp median + 3 robust SD). The data are then re-referenced to the average of the good scalp channels, with Pz (the all-zero recording reference) included and the earclips A1/A2 excluded. Bad channels are listed in `info["bads"]`; `reference="average"` restores the legacy all-channel average.
+- **Epoch**: `epoch_s` relative to the trigger event. `LEGACY_EPOCH_S` (2.5-60 s) feeds the 2 s-window and latency code; `SPECTRUM_EPOCH_S` (4.5 s + 56 s) feeds `FrequencyTagging`.
+- **Output**: `Iterator[Tuple[str, ConditionProperties, mne.Info, float, RawStudyData]]`: session ID, condition, info (with `bads`), sample rate, and `(1, Trial, Channel, Time)` data in microvolts.
 
 ## 3. The Registry: `Study`
 
@@ -33,7 +33,9 @@ The `Study` class manages the lifecycle of data and coordinates subject identiti
 ### Initialization
 - `__init__(data_stream: Iterator, min_trials: int = 3)`: 
     - Consumes the stream and groups data by condition and subject.
-    - Enforces a minimum trial count per subject; truncates extra trials to maintain consistent dimensions.
+    - Enforces a minimum trial count per subject; truncates extra trials to maintain consistent dimensions (and reports which subjects were truncated).
+    - Aligns channels by name across subjects (re-indexes a different order; rejects a different channel set).
+    - Collects each recording's `info["bads"]` into a `(Subject, Channel)` mask, exposed as `ConditionView.bad_channels()`.
     - Assigns unique integer IDs to subjects.
     - Populates each `Subject` object's internal view registry.
 
@@ -72,6 +74,11 @@ A configured "lens" into a `ConditionBlob`.
 - **Deterministic Alignment**: Subjects are sorted alphabetically during blob creation.
 
 ## 6. Analysis & Visualization
+
+### Default measure: `FrequencyTagging` (analysis.py)
+One FFT per trial over the whole `SPECTRUM_EPOCH_S` epoch (56 s, 1/56 Hz bins), amplitude spectra averaged over trials, bad channels NaN. Each bin is compared with 20 neighbours (10 per side, adjacent bin skipped): baseline-corrected amplitude (BCA), z and amplitude SNR. ROIs are fixed (`ODDBALL_ROI` = T5+T6, `CARRIER_ROI` = O1+O2) and averaged over their good channels; no per-subject channel selection. `existence(f)` gives the grand-average z, one-sample t and Wilcoxon on BCA, and detection counts at z > 1.64 and z > 3.1. `oddball_harmonics` marks an oddball harmonic as contaminated only when it is a multiple of that condition's own carrier. Reports and figures: `existence_report`, `harmonic_report`, `plot_bca_topomaps`, `plot_amplitude_snr_spectra` (analyze_spectrum.py), run by `main.py`.
+
+The sections below describe the legacy 2 s-window power-SNR measure (`Spectral`), still available via `main.py --legacy`.
 
 ### A. Single-Subject/Aggregate Spectrum (`analyze_spectrum`)
 Plots the frequency-domain characteristics of a `PowerSpectcraAnalyzable` object.

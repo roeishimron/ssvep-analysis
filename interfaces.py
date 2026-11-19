@@ -23,6 +23,7 @@ from typing import (
 )
 
 import mne
+import numpy as np
 
 from core_types import ConditionProperties, RawStudyData
 
@@ -54,6 +55,9 @@ class Recording(Protocol[K_co]):
     def channel_names(self) -> List[str]: ...
     def take_channels(self, names: List[str]) -> "Recording[K_co]": ...
     def props(self) -> K_co: ...
+    def bad_channels(self) -> np.ndarray:
+        """(Subject, Channel) bool mask of channels flagged bad at load time."""
+        ...
 
 
 @runtime_checkable

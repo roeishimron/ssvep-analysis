@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import mne
 import numpy as np
@@ -113,6 +114,46 @@ class TestStudy(unittest.TestCase):
         study = Study(iter([]))
         with self.assertRaises(KeyError):
             study.aggregate(self.props1)
+
+    def test_channels_are_aligned_by_name(self):
+        # Same channels in a different order: re-indexed, not stacked by position.
+        data1 = np.random.rand(1, 3, 3, 200)
+        data2 = np.random.rand(1, 3, 3, 200)
+        shuffled = _info(("P3", "O1", "O2"))
+        study = Study(iter([("S1", self.props1, self.info, 100.0, data1),
+                            ("S2", self.props1, shuffled, 100.0, data2)]))
+        blob = study._blobs[self.props1]
+        np.testing.assert_array_equal(blob.raw_data[1, :, 0], data2[0, :, 1])   # O1
+        np.testing.assert_array_equal(blob.raw_data[1, :, 2], data2[0, :, 0])   # P3
+
+    def test_different_channel_sets_are_rejected(self):
+        other = _info(("O1", "O2", "Cz"))
+        stream = [("S1", self.props1, self.info, 100.0, np.random.rand(1, 3, 3, 200)),
+                  ("S2", self.props1, other, 100.0, np.random.rand(1, 3, 3, 200))]
+        with self.assertRaises(ValueError):
+            Study(iter(stream))
+
+    def test_bad_channels_from_info(self):
+        info_bad = _info()
+        info_bad["bads"] = ["O2"]
+        stream = [("S1", self.props1, self.info, 100.0, np.random.rand(1, 3, 3, 200)),
+                  ("S2", self.props1, info_bad, 100.0, np.random.rand(1, 3, 3, 200))]
+        study = Study(iter(stream))
+        np.testing.assert_array_equal(
+            study.conditions()[self.props1].bad_channels(),
+            [[False, False, False], [False, True, False]],
+        )
+        s2 = study.subjects()["S2"][self.props1].take_channels(["O2", "P3"])
+        np.testing.assert_array_equal(s2.bad_channels(), [[True, False]])
+        self.assertEqual(study.conditions()[self.props1].mne_info()["bads"], [])
+        np.testing.assert_array_equal(study.aggregate(self.props1).bad_channels(), [[False, True, False]])
+
+    def test_truncation_is_reported(self):
+        stream = [self._stream_entry("S1", self.props1, n_trials=4)]
+        with patch("builtins.print") as mock_print:
+            study = Study(iter(stream), min_trials=3)
+        self.assertEqual(study._blobs[self.props1].n_trials, 3)
+        self.assertIn("S1 (4)", " ".join(str(c.args[0]) for c in mock_print.call_args_list))
 
 
 class TestSpectralShapes(unittest.TestCase):
